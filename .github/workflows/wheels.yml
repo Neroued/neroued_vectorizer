@@ -48,7 +48,7 @@ jobs:
           CIBW_VER=20.26.6
           case "$RUNNER_OS" in
             macOS)   DIR=~/Library/Caches/cibuildwheel ;;
-            Windows) DIR="$LOCALAPPDATA/cibuildwheel" ;;
+            Windows) DIR="$LOCALAPPDATA/pypa/cibuildwheel/Cache" ;;
           esac
           mkdir -p "$DIR"
           URL="https://github.com/pypa/get-virtualenv/blob/${CIBW_VER}/public/virtualenv.pyz?raw=true"

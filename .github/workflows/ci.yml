@@ -137,10 +137,13 @@ jobs:
         shell: cmd
         run: ci\install-deps-windows.bat
 
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         run: >
-          cmake -S . -B build
+          cmake -S . -B build -G Ninja
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=x64-windows-release
           -DCMAKE_BUILD_TYPE=Release
@@ -197,6 +200,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: ci\install-deps-windows.bat
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
 
       - uses: actions/setup-python@v5
         with:

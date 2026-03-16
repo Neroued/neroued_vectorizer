@@ -39,9 +39,7 @@ yum config-manager --set-enabled powertools 2>/dev/null \
     || dnf config-manager --set-enabled powertools 2>/dev/null \
     || true
 
-if ! yum install -y opencv-devel 2>/dev/null; then
-    install_opencv_from_source
-fi
+install_opencv_from_source
 
 # ── Potrace ───────────────────────────────────────────────────────────────────
 install_potrace_from_source() {
@@ -59,8 +57,6 @@ install_potrace_from_source() {
     rm -rf /tmp/potrace*
 }
 
-if ! yum install -y potrace-devel 2>/dev/null; then
-    install_potrace_from_source
-fi
+install_potrace_from_source
 
 echo "=== Linux dependency installation complete ==="

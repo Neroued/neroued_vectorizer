@@ -64,6 +64,7 @@ test-command = "pytest {project}/python/tests -v"
 before-all = "bash {project}/ci/install-deps-linux.sh"
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
+repair-wheel-command = "LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64 auditwheel repair -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
 before-all = "bash {project}/ci/install-deps-macos.sh"

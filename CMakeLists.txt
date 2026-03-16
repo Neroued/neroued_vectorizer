@@ -87,9 +87,11 @@ endif()
 
 # Potrace
 find_library(POTRACE_LIBRARY potrace
-    HINTS $ENV{POTRACE_ROOT} $ENV{POTRACE_ROOT}/lib)
+    HINTS $ENV{POTRACE_ROOT} ${POTRACE_ROOT}
+          $ENV{POTRACE_ROOT}/lib ${POTRACE_ROOT}/lib)
 find_path(POTRACE_INCLUDE_DIR potracelib.h
-    HINTS $ENV{POTRACE_ROOT} $ENV{POTRACE_ROOT}/include)
+    HINTS $ENV{POTRACE_ROOT} ${POTRACE_ROOT}
+          $ENV{POTRACE_ROOT}/include ${POTRACE_ROOT}/include)
 if(NOT POTRACE_LIBRARY OR NOT POTRACE_INCLUDE_DIR)
     message(FATAL_ERROR
         "Potrace is required but was not found.\n"

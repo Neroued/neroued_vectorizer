@@ -217,7 +217,8 @@ jobs:
         run: pip install --verbose .
         env:
           CMAKE_TOOLCHAIN_FILE: C:/vcpkg/scripts/buildsystems/vcpkg.cmake
-          SKBUILD_CMAKE_DEFINE: "VCPKG_TARGET_TRIPLET=x64-windows-release;POTRACE_ROOT=C:/potrace"
+          SKBUILD_CMAKE_DEFINE: "VCPKG_TARGET_TRIPLET=x64-windows-release"
+          POTRACE_ROOT: C:\potrace
 
       - name: Run tests
         run: |

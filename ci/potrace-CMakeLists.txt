@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.16)
+project(potrace C)
+
+set(POTRACE_VERSION "1.16" CACHE STRING "Potrace version")
+
+file(WRITE "${CMAKE_BINARY_DIR}/config.h"
+    "#ifndef POTRACE_CONFIG_H\n"
+    "#define POTRACE_CONFIG_H\n"
+    "#define VERSION \"${POTRACE_VERSION}\"\n"
+    "#define POTRACE_VERSION \"${POTRACE_VERSION}\"\n"
+    "#define HAVE_INTTYPES_H 1\n"
+    "#endif\n"
+)
+
+add_library(potrace STATIC
+    src/potracelib.c
+    src/trace.c
+    src/decompose.c
+    src/curve.c
+)
+
+target_include_directories(potrace
+    PRIVATE src "${CMAKE_BINARY_DIR}"
+)
+
+install(TARGETS potrace ARCHIVE DESTINATION lib)
+install(FILES src/potracelib.h DESTINATION include)

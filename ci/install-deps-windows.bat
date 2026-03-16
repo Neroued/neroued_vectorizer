@@ -1,9 +1,9 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 
 REM ── CI dependency installer for Windows ─────────────────────────────────────
-REM Uses VCPKG_INSTALLATION_ROOT provided by GitHub Actions runners.
-REM Falls back to cloning vcpkg if the variable is not set.
+
+REM ── OpenCV via vcpkg ────────────────────────────────────────────────────────
 
 if defined VCPKG_INSTALLATION_ROOT (
     set "VCPKG=%VCPKG_INSTALLATION_ROOT%\vcpkg"
@@ -16,7 +16,27 @@ if defined VCPKG_INSTALLATION_ROOT (
     set "VCPKG=C:\vcpkg\vcpkg"
 )
 
-echo Installing OpenCV and Potrace via vcpkg ...
-"%VCPKG%" install opencv4:x64-windows potrace:x64-windows
+echo Installing OpenCV via vcpkg ...
+"%VCPKG%" install opencv4:x64-windows
+if errorlevel 1 exit /b 1
+
+REM ── Potrace from source (vcpkg has no port) ────────────────────────────────
+
+set POTRACE_VER=1.16
+set POTRACE_PREFIX=C:\potrace
+
+echo Downloading potrace %POTRACE_VER% ...
+curl -L -o potrace.tar.gz "https://potrace.sourceforge.net/download/%POTRACE_VER%/potrace-%POTRACE_VER%.tar.gz"
+if errorlevel 1 exit /b 1
+tar xzf potrace.tar.gz
+
+echo Building potrace from source ...
+copy /Y "%~dp0potrace-CMakeLists.txt" "potrace-%POTRACE_VER%\CMakeLists.txt"
+cmake -S "potrace-%POTRACE_VER%" -B potrace-build -DCMAKE_INSTALL_PREFIX="%POTRACE_PREFIX%" -DCMAKE_BUILD_TYPE=Release
+if errorlevel 1 exit /b 1
+cmake --build potrace-build --config Release
+if errorlevel 1 exit /b 1
+cmake --install potrace-build --config Release
+if errorlevel 1 exit /b 1
 
 echo === Windows dependency installation complete ===

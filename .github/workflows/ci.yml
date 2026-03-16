@@ -50,12 +50,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.VCPKG_INSTALLATION_ROOT }}/installed
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: vcpkg-${{ runner.os }}-
+          key: vcpkg-${{ runner.os }}-opencv-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: vcpkg-${{ runner.os }}-opencv-
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install opencv4:x64-windows potrace:x64-windows
+        shell: cmd
+        run: ci\install-deps-windows.bat
 
       - name: Configure (Unix)
         if: runner.os != 'Windows'
@@ -75,6 +76,8 @@ jobs:
           -DNV_BUILD_TESTS=ON
           -DNV_BUILD_EVAL=ON
           -DNV_BUILD_APPS=ON
+        env:
+          POTRACE_ROOT: C:\potrace
 
       - name: Build
         run: cmake --build build --config Release -j4

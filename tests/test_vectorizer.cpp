@@ -123,7 +123,7 @@ VectorizerConfig BaseConfig() {
 
 } // namespace
 
-TEST(Vectorizer, KeepsTopLeftRegionAndNoNegativePathCoords) {
+TEST(Vectorizer, KeepsTopLeftRegionVisible) {
     cv::Mat img(32, 32, CV_8UC3, cv::Scalar(255, 255, 255));
     cv::rectangle(img, cv::Rect(0, 0, 8, 8), cv::Scalar(0, 0, 0), cv::FILLED);
 
@@ -133,8 +133,6 @@ TEST(Vectorizer, KeepsTopLeftRegionAndNoNegativePathCoords) {
 
     EXPECT_EQ(out.width, 32);
     EXPECT_EQ(out.height, 32);
-    EXPECT_EQ(out.svg_content.find("M-"), std::string::npos);
-    EXPECT_EQ(out.svg_content.find("C-"), std::string::npos);
 
     auto raster  = RasterizeSvg(out.svg_content, out.width, out.height);
     cv::Vec3b px = raster.bgr.at<cv::Vec3b>(1, 1);

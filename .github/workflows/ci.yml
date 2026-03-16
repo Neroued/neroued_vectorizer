@@ -124,21 +124,18 @@ jobs:
             -DNV_BUILD_TESTS=ON -DNV_BUILD_EVAL=ON -DNV_BUILD_APPS=ON
 
       # ── Windows ───────────────────────────────────────────────────────────
-      - name: Export Windows environment variables
+      - name: Cache vcpkg packages (Windows)
         if: runner.os == 'Windows'
-        uses: actions/github-script@v7
+        uses: actions/cache@v4
         with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-            core.exportVariable('VCPKG_INSTALLATION_ROOT', process.env.VCPKG_INSTALLATION_ROOT || 'C:\\vcpkg');
+          path: C:/vcpkg/installed
+          key: vcpkg-cpp-${{ runner.os }}-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
+          restore-keys: vcpkg-cpp-${{ runner.os }}-
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         run: ci\install-deps-windows.bat
-        env:
-          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
@@ -147,7 +144,7 @@ jobs:
         if: runner.os == 'Windows'
         run: >
           cmake -S . -B build -G Ninja
-          -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_INSTALLATION_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=x64-windows-release
           -DCMAKE_BUILD_TYPE=Release
           -DNV_BUILD_TESTS=ON -DNV_BUILD_EVAL=ON -DNV_BUILD_APPS=ON
@@ -191,21 +188,18 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install opencv potrace
 
-      - name: Export Windows environment variables
+      - name: Cache vcpkg packages (Windows)
         if: runner.os == 'Windows'
-        uses: actions/github-script@v7
+        uses: actions/cache@v4
         with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-            core.exportVariable('VCPKG_INSTALLATION_ROOT', process.env.VCPKG_INSTALLATION_ROOT || 'C:\\vcpkg');
+          path: C:/vcpkg/installed
+          key: vcpkg-py-${{ runner.os }}-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
+          restore-keys: vcpkg-py-${{ runner.os }}-
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         run: ci\install-deps-windows.bat
-        env:
-          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
@@ -222,9 +216,8 @@ jobs:
         if: runner.os == 'Windows'
         run: pip install --verbose .
         env:
-          CMAKE_TOOLCHAIN_FILE: ${{ env.VCPKG_INSTALLATION_ROOT }}/scripts/buildsystems/vcpkg.cmake
-          VCPKG_DEFAULT_TRIPLET: x64-windows-release
-          POTRACE_ROOT: C:\potrace
+          CMAKE_TOOLCHAIN_FILE: C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+          SKBUILD_CMAKE_DEFINE: "VCPKG_TARGET_TRIPLET=x64-windows-release;POTRACE_ROOT=C:/potrace"
 
       - name: Run tests
         run: |

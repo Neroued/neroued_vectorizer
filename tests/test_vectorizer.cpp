@@ -197,7 +197,7 @@ TEST(Vectorizer, KeepsOnePixelBlackLineContinuous) {
     cv::cvtColor(raster.bgr, gray, cv::COLOR_BGR2GRAY);
 
     cv::Mat dark;
-    cv::threshold(gray, dark, 60, 255, cv::THRESH_BINARY_INV);
+    cv::threshold(gray, dark, 128, 255, cv::THRESH_BINARY_INV);
 
     cv::Mat cc_labels;
     int cc = cv::connectedComponents(dark, cc_labels, 8, CV_32S);
@@ -246,8 +246,8 @@ TEST(Vectorizer, LowResCirclePreservesCurvatureAndCoverage) {
     auto out    = Vectorize(img, cfg);
     auto raster = RasterizeSvg(out.svg_content, out.width, out.height);
 
-    cv::Mat src_mask = ExtractDarkMask(img);
-    cv::Mat out_mask = ExtractDarkMask(raster.bgr);
+    cv::Mat src_mask = ExtractDarkMask(img, 128);
+    cv::Mat out_mask = ExtractDarkMask(raster.bgr, 128);
 
     cv::Mat relaxed_src;
     cv::dilate(src_mask, relaxed_src, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3)));

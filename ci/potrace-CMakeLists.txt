@@ -23,5 +23,7 @@ target_include_directories(potrace
     PRIVATE src "${CMAKE_BINARY_DIR}"
 )
 
+target_compile_definitions(potrace PRIVATE HAVE_CONFIG_H)
+
 install(TARGETS potrace ARCHIVE DESTINATION lib)
 install(FILES src/potracelib.h DESTINATION include)

@@ -6,20 +6,53 @@ on:
   pull_request:
     branches: [master]
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
-  # ── Code formatting check ─────────────────────────────────────────────────
+  # ── C++ format check (changed files only) ─────────────────────────────────
   format-check:
     name: clang-format
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Check formatting
+      - name: Install clang-format-18
         run: |
-          sudo apt-get update && sudo apt-get install -y clang-format
-          find src include python -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
-            | xargs clang-format --dry-run --Werror
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-format-18
+
+      - name: Check formatting of changed files
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          FILES=$(git diff --name-only --diff-filter=ACM "$BASE" HEAD \
+            | grep -E '\.(cpp|h|hpp|cc|cxx)$' \
+            | grep -E '^(src|include|python|tests|apps|eval)/' || true)
+
+          if [ -z "$FILES" ]; then
+            echo "No C++ files changed, skipping."
+            exit 0
+          fi
+
+          echo "Checking formatting for:"
+          echo "$FILES"
+          FAILED=0
+          for f in $FILES; do
+            if ! clang-format-18 --dry-run --Werror "$f" 2>/dev/null; then
+              echo "::error file=$f::Format mismatch. Run: clang-format -i $f"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::Some files need formatting."
+            exit 1
+          fi
+          echo "All changed C++ files are correctly formatted."
 
   # ── C++ build & test ──────────────────────────────────────────────────────
   cpp-build:
@@ -28,44 +61,80 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-latest]
+        os: [ubuntu-22.04, macos-14, windows-latest]
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
+      # ── Linux ─────────────────────────────────────────────────────────────
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopencv-dev libpotrace-dev
+          sudo apt-get install -y --no-install-recommends \
+            libopencv-dev libpotrace-dev ninja-build ccache
+          mkdir -p ~/.cache/ccache
 
+      - name: Cache ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: ccache-linux-
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          ccache --set-config=max_size=1G
+          ccache -z
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNV_BUILD_TESTS=ON -DNV_BUILD_EVAL=ON -DNV_BUILD_APPS=ON
+
+      # ── macOS ─────────────────────────────────────────────────────────────
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install opencv potrace
+        run: brew install opencv potrace ninja ccache
 
+      - name: Cache ccache (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-macos-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: ccache-macos-
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          ccache --set-config=max_size=1G
+          ccache -z
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNV_BUILD_TESTS=ON -DNV_BUILD_EVAL=ON -DNV_BUILD_APPS=ON
+
+      # ── Windows ───────────────────────────────────────────────────────────
       - name: Cache vcpkg packages (Windows)
         if: runner.os == 'Windows'
         uses: actions/cache@v4
         with:
           path: ${{ env.VCPKG_INSTALLATION_ROOT }}/installed
-          key: vcpkg-${{ runner.os }}-opencv-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: vcpkg-${{ runner.os }}-opencv-
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
+          restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         run: ci\install-deps-windows.bat
-
-      - name: Configure (Unix)
-        if: runner.os != 'Windows'
-        run: >
-          cmake -S . -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DNV_BUILD_TESTS=ON
-          -DNV_BUILD_EVAL=ON
-          -DNV_BUILD_APPS=ON
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
@@ -73,17 +142,20 @@ jobs:
           cmake -S . -B build
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           -DCMAKE_BUILD_TYPE=Release
-          -DNV_BUILD_TESTS=ON
-          -DNV_BUILD_EVAL=ON
-          -DNV_BUILD_APPS=ON
+          -DNV_BUILD_TESTS=ON -DNV_BUILD_EVAL=ON -DNV_BUILD_APPS=ON
         env:
           POTRACE_ROOT: C:\potrace
 
+      # ── Build & test ──────────────────────────────────────────────────────
       - name: Build
         run: cmake --build build --config Release -j4
 
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: ccache stats
+        if: always() && runner.os != 'Windows'
+        run: ccache -s
 
   # ── Python bindings build & test ──────────────────────────────────────────
   python-test:
@@ -92,7 +164,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-22.04, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
@@ -105,21 +177,41 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopencv-dev libpotrace-dev
+          sudo apt-get install -y --no-install-recommends libopencv-dev libpotrace-dev
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install opencv potrace
 
+      - name: Cache vcpkg packages (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_INSTALLATION_ROOT }}/installed
+          key: vcpkg-py-${{ runner.os }}-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
+          restore-keys: vcpkg-py-${{ runner.os }}-
+
+      - name: Install system dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: ci\install-deps-windows.bat
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install package
+      - name: Install package (Unix)
+        if: runner.os != 'Windows'
         run: pip install --verbose .
 
-      - name: Install test dependencies
-        run: pip install pytest numpy opencv-python-headless
+      - name: Install package (Windows)
+        if: runner.os == 'Windows'
+        run: pip install --verbose .
+        env:
+          CMAKE_TOOLCHAIN_FILE: ${{ env.VCPKG_INSTALLATION_ROOT }}/scripts/buildsystems/vcpkg.cmake
+          POTRACE_ROOT: C:\potrace
 
       - name: Run tests
-        run: pytest python/tests -v
+        run: |
+          pip install pytest numpy opencv-python-headless
+          pytest python/tests -v

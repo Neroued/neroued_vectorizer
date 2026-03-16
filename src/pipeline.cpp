@@ -20,6 +20,8 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <stdexcept>
@@ -377,6 +379,19 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
             }
         }
         spdlog::debug("Vectorize output rescaled by inverse factor={:.4f}", inv);
+    }
+
+    const float fw = static_cast<float>(bgr.cols);
+    const float fh = static_cast<float>(bgr.rows);
+    for (auto& shape : shapes) {
+        for (auto& contour : shape.contours) {
+            for (auto& s : contour.segments) {
+                s.p0 = {std::clamp(s.p0.x, 0.f, fw), std::clamp(s.p0.y, 0.f, fh)};
+                s.p1 = {std::clamp(s.p1.x, 0.f, fw), std::clamp(s.p1.y, 0.f, fh)};
+                s.p2 = {std::clamp(s.p2.x, 0.f, fw), std::clamp(s.p2.y, 0.f, fh)};
+                s.p3 = {std::clamp(s.p3.x, 0.f, fw), std::clamp(s.p3.y, 0.f, fh)};
+            }
+        }
     }
 
     VectorizerResult result;

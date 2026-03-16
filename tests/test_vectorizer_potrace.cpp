@@ -81,8 +81,11 @@ RasterizedSvg RasterizeSvg(const std::string& svg, int width, int height) {
         }
         if (contours.empty()) continue;
 
+        cv::Scalar color = NsvgColorToBgr(shape->fill.color);
         cv::fillPoly(result.coverage, contours, cv::Scalar(255));
-        cv::fillPoly(result.bgr, contours, NsvgColorToBgr(shape->fill.color));
+        cv::fillPoly(result.bgr, contours, color);
+        cv::polylines(result.coverage, contours, true, cv::Scalar(255), 1, cv::LINE_8);
+        cv::polylines(result.bgr, contours, true, color, 1, cv::LINE_8);
     }
 
     nsvgDelete(image);

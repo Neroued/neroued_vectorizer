@@ -12,6 +12,14 @@ See :func:`vectorize` for full documentation.
 
 from __future__ import annotations
 
+import os
+import sys
+
+if sys.platform == "win32":
+    _dll_dir = os.environ.get("NV_DLL_DIR", "")
+    if _dll_dir and os.path.isdir(_dll_dir):
+        os.add_dll_directory(_dll_dir)
+
 from importlib.metadata import PackageNotFoundError, version
 
 from neroued_vectorizer._core import (

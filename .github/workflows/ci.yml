@@ -220,12 +220,9 @@ jobs:
           SKBUILD_CMAKE_DEFINE: "VCPKG_TARGET_TRIPLET=x64-windows-release"
           POTRACE_ROOT: C:\potrace
 
-      - name: Add vcpkg DLLs to PATH (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: echo "C:\vcpkg\installed\x64-windows-release\bin" >> $env:GITHUB_PATH
-
       - name: Run tests
         run: |
           pip install pytest numpy opencv-python-headless
           pytest python/tests -v
+        env:
+          NV_DLL_DIR: ${{ runner.os == 'Windows' && 'C:\vcpkg\installed\x64-windows-release\bin' || '' }}

@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  # ── Code formatting check ─────────────────────────────────────────────────
+  format-check:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check formatting
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang-format
+          find src include python -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
+            | xargs clang-format --dry-run --Werror
+
+  # ── C++ build & test ──────────────────────────────────────────────────────
+  cpp-build:
+    name: C++ (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopencv-dev libpotrace-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install opencv potrace
+
+      - name: Cache vcpkg packages (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_INSTALLATION_ROOT }}/installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install opencv4:x64-windows potrace:x64-windows
+
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DNV_BUILD_TESTS=ON
+          -DNV_BUILD_EVAL=ON
+          -DNV_BUILD_APPS=ON
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: >
+          cmake -S . -B build
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_BUILD_TYPE=Release
+          -DNV_BUILD_TESTS=ON
+          -DNV_BUILD_EVAL=ON
+          -DNV_BUILD_APPS=ON
+
+      - name: Build
+        run: cmake --build build --config Release -j4
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+  # ── Python bindings build & test ──────────────────────────────────────────
+  python-test:
+    name: Python ${{ matrix.python-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopencv-dev libpotrace-dev
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install opencv potrace
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: pip install --verbose .
+
+      - name: Install test dependencies
+        run: pip install pytest numpy opencv-python-headless
+
+      - name: Run tests
+        run: pytest python/tests -v

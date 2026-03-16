@@ -16,6 +16,7 @@
 - 可选 ICC 色彩管理（lcms2）
 - 质量评估模块（PSNR / SSIM / Delta E / Chamfer 距离）
 - CLI 工具：`raster_to_svg`、`evaluate_svg`
+- Python 绑定：`pip install neroued-vectorizer`
 
 ## 依赖
 
@@ -59,6 +60,7 @@ cmake --build . -j$(nproc)
 | `NV_BUILD_EVAL` | ON | 构建质量评估库 |
 | `NV_BUILD_APPS` | ON | 构建 CLI 工具 |
 | `NV_BUILD_TESTS` | ON | 构建单元测试 |
+| `NV_BUILD_PYTHON` | OFF | 构建 Python 绑定（需要 pybind11） |
 
 仅构建核心库：
 
@@ -128,6 +130,55 @@ cmake --install build --prefix /usr/local
 | `--log-level LEVEL` | 日志级别（默认 info） |
 
 矢量化参数覆盖（与 `raster_to_svg` 相同）可通过 `--help` 查看。
+
+## Python 绑定
+
+### 安装
+
+```bash
+pip install neroued-vectorizer
+```
+
+从源码构建（需要系统已安装 OpenCV 和 Potrace）：
+
+```bash
+pip install .
+```
+
+### Python 用法
+
+```python
+import neroued_vectorizer as nv
+
+# 从文件路径
+result = nv.vectorize("photo.png")
+
+# 从内存字节
+with open("photo.png", "rb") as f:
+    result = nv.vectorize(f.read())
+
+# 从 numpy 数组（BGR/BGRA/GRAY uint8）
+import numpy as np
+img = np.zeros((100, 100, 3), dtype=np.uint8)
+result = nv.vectorize(img)
+
+# 自定义配置
+config = nv.VectorizerConfig()
+config.num_colors = 8
+config.curve_fit_error = 1.0
+result = nv.vectorize("photo.png", config)
+
+# 使用结果
+print(result.svg_content)       # SVG 文档字符串
+print(result.width, result.height)
+print(result.num_shapes)
+print(result.palette)           # list[nv.Rgb]
+
+# 保存
+result.save("output.svg")
+```
+
+`VectorizerConfig` 的所有参数与 C++ 版本一致，参见下方参数表。
 
 ## 库集成
 
@@ -219,14 +270,15 @@ std::ofstream("output.svg") << result.svg_content;
 
 ### VectorizerResult
 
-| 字段 | 类型 | 说明 |
+| 字段 / 方法 | 类型 | 说明 |
 |------|------|------|
 | `svg_content` | string | 完整 SVG 文档 |
 | `width` | int | 图像宽度（像素） |
 | `height` | int | 图像高度（像素） |
 | `num_shapes` | int | SVG 中的形状数 |
 | `resolved_num_colors` | int | 实际使用的颜色数 |
-| `palette` | vector\<Rgb\> | 使用的调色板 |
+| `palette` | vector\<Rgb\> / list[Rgb] | 使用的调色板 |
+| `save(path)` | Python only | 将 SVG 内容保存到文件 |
 
 ## 目录结构
 
@@ -249,10 +301,47 @@ neroued_vectorizer/
 │   ├── trace/                    # 追踪（Potrace、覆盖率、拓扑修复）
 │   ├── output/                   # 输出（SVG 写入、形状合并）
 │   └── detail/                   # 内部工具（cv_utils、icc_utils）
+├── python/                       # Python 绑定
+│   ├── neroued_vectorizer/       # Python 包（__init__.py、类型桩）
+│   ├── bindings.cpp              # pybind11 绑定代码
+│   └── tests/                    # Python 测试
 ├── eval/                         # 质量评估库
 ├── apps/                         # CLI 工具
+├── ci/                           # CI 依赖安装脚本
 └── tests/                        # 单元测试
 ```
+
+## 版本管理与发布
+
+版本号由 git tag 自动派生（基于 [setuptools-scm](https://github.com/pypa/setuptools-scm)）：
+
+- `v0.2.0` tag → PyPI 版本 `0.2.0`
+- tag 后的开发提交 → `0.2.1.dev3+gabcdef`
+
+### 发布流程
+
+```bash
+# 1. 预发布验证（自动发到 TestPyPI）
+git tag v0.2.0rc1
+git push origin v0.2.0rc1
+
+# 2. 验证 TestPyPI 上的包
+pip install --index-url https://test.pypi.org/simple/ \
+            --extra-index-url https://pypi.org/simple/ \
+            neroued-vectorizer==0.2.0rc1
+
+# 3. 正式发布（自动发到 PyPI）
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+### 支持平台
+
+| 平台 | 架构 | Python |
+|------|------|--------|
+| Linux | x86_64, aarch64 | 3.10 – 3.13 |
+| macOS | x86_64, arm64 | 3.10 – 3.13 |
+| Windows | x86_64 | 3.10 – 3.13 |
 
 ## 许可证
 

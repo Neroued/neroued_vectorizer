@@ -28,8 +28,11 @@
 - `src/trace/`：Potrace 位图追踪、覆盖率修补、Clipper2 拓扑修复
 - `src/output/`：SVG 文档生成、同色形状合并
 - `src/detail/`：内部工具（OpenCV 辅助、ICC 色彩管理）
+- `python/`：Python 绑定（pybind11 绑定代码、Python 包、测试）
 - `eval/`：质量评估库（像素/边缘/路径指标、基线对比）
 - `apps/`：CLI 工具（raster_to_svg、evaluate_svg）
+- `ci/`：CI 依赖安装脚本（Linux/macOS/Windows）
+- `.github/workflows/`：GitHub Actions CI/CD
 - `tests/`：单元测试
 
 ## 按任务快速定位
@@ -49,6 +52,10 @@
 | 新增/修改配置参数 | `include/neroued/vectorizer/config.h` |
 | 修改质量评估指标 | `eval/src/pixel_metrics.cpp`、`eval/src/edge_metrics.cpp`、`eval/src/path_metrics.cpp` |
 | 修改 CLI 工具参数 | `apps/raster_to_svg.cpp`、`apps/evaluate_svg.cpp` |
+| 修改 Python 绑定 | `python/bindings.cpp`、`python/neroued_vectorizer/__init__.py` |
+| 修改 Python 类型桩 | `python/neroued_vectorizer/_core.pyi` |
+| 修改 CI/CD | `.github/workflows/ci.yml`、`.github/workflows/wheels.yml` |
+| 修改 wheel 构建配置 | `pyproject.toml`、`ci/install-deps-*.sh` |
 
 ## 核心类型与 API
 
@@ -91,6 +98,7 @@
 - OpenCV 和 Potrace 为必需系统依赖
 - spdlog 和 Clipper2 通过 FetchContent 自动获取（也支持 3rdparty/ 子目录）
 - lcms2 + libjpeg 为可选依赖（ICC 色彩管理）
+- pybind11 通过 scikit-build-core 构建时自动获取（Python 绑定）
 
 ## 提交前检查清单
 
@@ -102,3 +110,5 @@
 - [ ] 新增文件 → 更新 CMakeLists.txt 和 AGENTS.md 模块索引
 - [ ] 不引入重复工具函数
 - [ ] 不在公共头文件中暴露内部实现细节
+- [ ] Python 绑定变更 → 同步更新 `_core.pyi` 类型桩
+- [ ] Python API 变更 → 更新 README.md Python 用法

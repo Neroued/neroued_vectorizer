@@ -1,0 +1,66 @@
+#!/bin/bash
+set -euo pipefail
+
+# ── CI dependency installer for manylinux_2_28 (AlmaLinux 8) ─────────────────
+
+yum install -y cmake gcc gcc-c++ make git curl
+
+# ── OpenCV ────────────────────────────────────────────────────────────────────
+# Try distro packages first, fall back to building from source.
+install_opencv_from_source() {
+    local ver="4.9.0"
+    echo "Building OpenCV ${ver} from source ..."
+    yum install -y libpng-devel libjpeg-turbo-devel libtiff-devel libwebp-devel zlib-devel
+    cd /tmp
+    curl -L -o opencv.tar.gz \
+        "https://github.com/opencv/opencv/archive/refs/tags/${ver}.tar.gz"
+    tar xzf opencv.tar.gz
+    cmake -S "opencv-${ver}" -B opencv-build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DBUILD_LIST=core,imgproc,imgcodecs \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_TESTS=OFF \
+        -DBUILD_PERF_TESTS=OFF \
+        -DBUILD_EXAMPLES=OFF \
+        -DBUILD_opencv_apps=OFF \
+        -DWITH_FFMPEG=OFF \
+        -DWITH_GTK=OFF \
+        -DWITH_V4L=OFF \
+        -DWITH_OPENCL=OFF
+    cmake --build opencv-build -j"$(nproc)"
+    cmake --install opencv-build
+    ldconfig
+    rm -rf /tmp/opencv*
+}
+
+yum install -y epel-release || true
+yum config-manager --set-enabled powertools 2>/dev/null \
+    || dnf config-manager --set-enabled powertools 2>/dev/null \
+    || true
+
+if ! yum install -y opencv-devel 2>/dev/null; then
+    install_opencv_from_source
+fi
+
+# ── Potrace ───────────────────────────────────────────────────────────────────
+install_potrace_from_source() {
+    local ver="1.16"
+    echo "Building potrace ${ver} from source ..."
+    cd /tmp
+    curl -L -o potrace.tar.gz \
+        "https://potrace.sourceforge.net/download/${ver}/potrace-${ver}.tar.gz"
+    tar xzf potrace.tar.gz
+    cd "potrace-${ver}"
+    ./configure --with-libpotrace --prefix=/usr/local
+    make -j"$(nproc)"
+    make install
+    ldconfig
+    rm -rf /tmp/potrace*
+}
+
+if ! yum install -y potrace-devel 2>/dev/null; then
+    install_potrace_from_source
+fi
+
+echo "=== Linux dependency installation complete ==="

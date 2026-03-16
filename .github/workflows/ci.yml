@@ -223,7 +223,7 @@ jobs:
         run: pip install --verbose .
         env:
           CMAKE_TOOLCHAIN_FILE: ${{ env.VCPKG_INSTALLATION_ROOT }}/scripts/buildsystems/vcpkg.cmake
-          VCPKG_TARGET_TRIPLET: x64-windows-release
+          VCPKG_DEFAULT_TRIPLET: x64-windows-release
           POTRACE_ROOT: C:\potrace
 
       - name: Run tests

@@ -16,8 +16,8 @@ if defined VCPKG_INSTALLATION_ROOT (
     set "VCPKG=C:\vcpkg\vcpkg"
 )
 
-echo Installing OpenCV via vcpkg (Release only) ...
-"%VCPKG%" install opencv4:x64-windows-release
+echo Installing OpenCV via vcpkg (Release only, minimal features) ...
+"%VCPKG%" install "opencv4[core,jpeg,png]:x64-windows-release" --host-triplet=x64-windows-release
 if errorlevel 1 exit /b 1
 
 REM ── Potrace from source (vcpkg has no port) ────────────────────────────────

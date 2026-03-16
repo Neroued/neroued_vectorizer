@@ -141,6 +141,7 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows-release
           -DCMAKE_BUILD_TYPE=Release
           -DNV_BUILD_TESTS=ON -DNV_BUILD_EVAL=ON -DNV_BUILD_APPS=ON
         env:
@@ -209,6 +210,7 @@ jobs:
         run: pip install --verbose .
         env:
           CMAKE_TOOLCHAIN_FILE: ${{ env.VCPKG_INSTALLATION_ROOT }}/scripts/buildsystems/vcpkg.cmake
+          VCPKG_TARGET_TRIPLET: x64-windows-release
           POTRACE_ROOT: C:\potrace
 
       - name: Run tests

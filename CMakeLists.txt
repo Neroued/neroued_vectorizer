@@ -86,13 +86,11 @@ elseif(NOT TARGET Clipper2)
     endif()
 endif()
 
-# Potrace
+# Potrace — pass -DPOTRACE_ROOT=<prefix> on Windows; Linux/macOS use system paths
 find_library(POTRACE_LIBRARY potrace
-    HINTS $ENV{POTRACE_ROOT} ${POTRACE_ROOT}
-          $ENV{POTRACE_ROOT}/lib ${POTRACE_ROOT}/lib)
+    HINTS ${POTRACE_ROOT}/lib ${POTRACE_ROOT})
 find_path(POTRACE_INCLUDE_DIR potracelib.h
-    HINTS $ENV{POTRACE_ROOT} ${POTRACE_ROOT}
-          $ENV{POTRACE_ROOT}/include ${POTRACE_ROOT}/include)
+    HINTS ${POTRACE_ROOT}/include ${POTRACE_ROOT})
 if(NOT POTRACE_LIBRARY OR NOT POTRACE_INCLUDE_DIR)
     message(FATAL_ERROR
         "Potrace is required but was not found.\n"

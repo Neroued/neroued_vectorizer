@@ -15,6 +15,13 @@ from __future__ import annotations
 import os
 import sys
 
+# Python 3.8+ on Windows no longer searches PATH for DLLs.  When the package
+# is installed from source via ``pip install .`` (not from a pre-built wheel
+# that already bundles DLLs via delvewheel), dynamically-linked libraries like
+# OpenCV must be made visible through ``os.add_dll_directory()``.
+# Set the ``NV_DLL_DIR`` environment variable to the directory containing
+# those DLLs (e.g. ``C:/vcpkg/installed/x64-windows-release/bin``).
+# Pre-built wheels ship with all required DLLs and do not need this.
 if sys.platform == "win32":
     _dll_dir = os.environ.get("NV_DLL_DIR", "")
     if _dll_dir and os.path.isdir(_dll_dir):

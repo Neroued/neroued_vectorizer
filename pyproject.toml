@@ -75,4 +75,4 @@ environment = { MACOSX_DEPLOYMENT_TARGET = "14.0" }
 before-all = "ci\\install-deps-windows.bat"
 before-build = "pip install delvewheel"
 repair-wheel-command = "delvewheel repair --add-path C:/vcpkg/installed/x64-windows-release/bin -w {dest_dir} {wheel}"
-environment = { CMAKE_TOOLCHAIN_FILE = "C:/vcpkg/scripts/buildsystems/vcpkg.cmake", SKBUILD_CMAKE_DEFINE = "VCPKG_TARGET_TRIPLET=x64-windows-release", POTRACE_ROOT = "C:/potrace" }
+environment = { CMAKE_TOOLCHAIN_FILE = "C:/vcpkg/scripts/buildsystems/vcpkg.cmake", SKBUILD_CMAKE_DEFINE = "VCPKG_TARGET_TRIPLET=x64-windows-release;POTRACE_ROOT=C:/potrace" }

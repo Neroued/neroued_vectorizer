@@ -11,6 +11,12 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
+# Windows shared constants — single source of truth for vcpkg paths
+env:
+  WIN_VCPKG_ROOT: C:/vcpkg
+  WIN_VCPKG_TRIPLET: x64-windows-release
+  WIN_POTRACE_ROOT: C:/potrace
+
 jobs:
   # ── C++ format check (changed files only) ─────────────────────────────────
   format-check:
@@ -128,9 +134,9 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/cache@v4
         with:
-          path: C:/vcpkg/installed
-          key: vcpkg-cpp-${{ runner.os }}-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
-          restore-keys: vcpkg-cpp-${{ runner.os }}-
+          path: ${{ env.WIN_VCPKG_ROOT }}/installed
+          key: vcpkg-win-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
+          restore-keys: vcpkg-win-
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -144,12 +150,11 @@ jobs:
         if: runner.os == 'Windows'
         run: >
           cmake -S . -B build -G Ninja
-          -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=x64-windows-release
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.WIN_VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ env.WIN_VCPKG_TRIPLET }}
+          -DPOTRACE_ROOT=${{ env.WIN_POTRACE_ROOT }}
           -DCMAKE_BUILD_TYPE=Release
           -DNV_BUILD_TESTS=ON -DNV_BUILD_EVAL=ON -DNV_BUILD_APPS=ON
-        env:
-          POTRACE_ROOT: C:\potrace
 
       # ── Build & test ──────────────────────────────────────────────────────
       - name: Build
@@ -192,9 +197,9 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/cache@v4
         with:
-          path: C:/vcpkg/installed
-          key: vcpkg-py-${{ runner.os }}-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
-          restore-keys: vcpkg-py-${{ runner.os }}-
+          path: ${{ env.WIN_VCPKG_ROOT }}/installed
+          key: vcpkg-win-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
+          restore-keys: vcpkg-win-
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
@@ -216,13 +221,12 @@ jobs:
         if: runner.os == 'Windows'
         run: pip install --verbose .
         env:
-          CMAKE_TOOLCHAIN_FILE: C:/vcpkg/scripts/buildsystems/vcpkg.cmake
-          SKBUILD_CMAKE_DEFINE: "VCPKG_TARGET_TRIPLET=x64-windows-release"
-          POTRACE_ROOT: C:\potrace
+          CMAKE_TOOLCHAIN_FILE: ${{ env.WIN_VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake
+          SKBUILD_CMAKE_DEFINE: "VCPKG_TARGET_TRIPLET=${{ env.WIN_VCPKG_TRIPLET }};POTRACE_ROOT=${{ env.WIN_POTRACE_ROOT }}"
 
       - name: Run tests
         run: |
           pip install pytest numpy opencv-python-headless
           pytest python/tests -v
         env:
-          NV_DLL_DIR: ${{ runner.os == 'Windows' && 'C:\vcpkg\installed\x64-windows-release\bin' || '' }}
+          NV_DLL_DIR: ${{ runner.os == 'Windows' && format('{0}/installed/{1}/bin', env.WIN_VCPKG_ROOT, env.WIN_VCPKG_TRIPLET) || '' }}

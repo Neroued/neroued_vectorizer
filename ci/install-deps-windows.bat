@@ -2,6 +2,12 @@
 setlocal enabledelayedexpansion
 
 REM ── CI dependency installer for Windows ─────────────────────────────────────
+REM
+REM Dependency versions — keep in sync with install-deps-linux.sh
+REM   OpenCV : installed via vcpkg (version determined by vcpkg port registry)
+REM   Potrace: built from source
+set POTRACE_VER=1.16
+set POTRACE_PREFIX=C:\potrace
 
 REM ── OpenCV via vcpkg ────────────────────────────────────────────────────────
 
@@ -21,9 +27,6 @@ echo Installing OpenCV via vcpkg (Release only, minimal features) ...
 if errorlevel 1 exit /b 1
 
 REM ── Potrace from source (vcpkg has no port) ────────────────────────────────
-
-set POTRACE_VER=1.16
-set POTRACE_PREFIX=C:\potrace
 
 echo Downloading potrace %POTRACE_VER% ...
 curl -L -o potrace.tar.gz "https://potrace.sourceforge.net/download/%POTRACE_VER%/potrace-%POTRACE_VER%.tar.gz"

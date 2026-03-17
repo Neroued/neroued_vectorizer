@@ -16,6 +16,10 @@ jobs:
         include:
           - os: ubuntu-24.04
             arch: x86_64
+          - os: ubuntu-24.04
+            arch: aarch64
+          - os: macos-13
+            arch: x86_64
           - os: macos-14
             arch: arm64
           - os: windows-latest
@@ -43,27 +47,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:/vcpkg/installed
-          key: vcpkg-wheels-${{ runner.os }}-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
-          restore-keys: vcpkg-wheels-${{ runner.os }}-
+          key: vcpkg-win-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
+          restore-keys: vcpkg-win-
 
-      - name: Pre-download virtualenv for cibuildwheel
-        if: runner.os != 'Linux'
-        shell: bash
-        run: |
-          CIBW_VER=20.26.6
-          case "$RUNNER_OS" in
-            macOS)   DIR=~/Library/Caches/cibuildwheel ;;
-            Windows) DIR="$LOCALAPPDATA/pypa/cibuildwheel/Cache" ;;
-          esac
-          mkdir -p "$DIR"
-          URL="https://github.com/pypa/get-virtualenv/blob/${CIBW_VER}/public/virtualenv.pyz?raw=true"
-          for i in 1 2 3 4 5; do
-            curl -fL --retry 3 --retry-delay 5 -o "$DIR/virtualenv-${CIBW_VER}.pyz" "$URL" && break
-            echo "Retry $i ..."
-            sleep $((i * 15))
-          done
-
-      - uses: pypa/cibuildwheel@v2.21
+      - uses: pypa/cibuildwheel@v2.23
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ env.SETUPTOOLS_SCM_PRETEND_VERSION }}

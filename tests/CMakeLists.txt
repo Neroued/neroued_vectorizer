@@ -1,11 +1,9 @@
-find_package(GTest QUIET)
-if(NOT GTest_FOUND)
-    include(FetchContent)
-    FetchContent_Declare(googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG v1.14.0)
-    FetchContent_MakeAvailable(googletest)
-endif()
+include(FetchContent)
+FetchContent_Declare(googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.14.0
+    GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(googletest)
 
 add_executable(test_vectorizer test_vectorizer.cpp)
 target_link_libraries(test_vectorizer PRIVATE neroued::vectorizer nanosvg GTest::gtest_main)

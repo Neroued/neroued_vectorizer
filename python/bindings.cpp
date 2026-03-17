@@ -3,6 +3,7 @@
 #include <pybind11/stl.h>
 
 #include <neroued/vectorizer/error.h>
+#include <neroued/vectorizer/logging.h>
 #include <neroued/vectorizer/vectorizer.h>
 
 #include <opencv2/core.hpp>
@@ -41,6 +42,14 @@ PYBIND11_MODULE(_core, m) {
     m.doc() = "neroued_vectorizer: high-quality raster-to-SVG vectorization.\n\n"
               "This module exposes the core C++ vectorization engine to Python.\n"
               "Use :func:`vectorize` to convert raster images to SVG.";
+
+    InitLogging(spdlog::level::warn);
+
+    // ── Logging ─────────────────────────────────────────────────────────────
+    m.def(
+        "set_log_level", [](const std::string& level) { InitLogging(ParseLogLevel(level)); },
+        py::arg("level"),
+        "Set C++ log verbosity: 'trace', 'debug', 'info', 'warn', 'error', 'off'.");
 
     // ── Rgb ──────────────────────────────────────────────────────────────────
     py::class_<Rgb>(m, "Rgb",

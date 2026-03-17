@@ -170,6 +170,15 @@ class VectorizerResult:
         """Length of the SVG content string."""
         ...
 
+def set_log_level(level: str) -> None:
+    """Set C++ log verbosity.
+
+    Args:
+        level: One of ``'trace'``, ``'debug'``, ``'info'``, ``'warn'``,
+               ``'error'``, ``'off'``. Default is ``'warn'``.
+    """
+    ...
+
 def vectorize(
     input: str | bytes | NDArray[np.uint8],
     config: VectorizerConfig = ...,

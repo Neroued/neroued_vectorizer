@@ -33,6 +33,7 @@ from neroued_vectorizer._core import (
     Rgb,
     VectorizerConfig,
     VectorizerResult,
+    set_log_level,
     vectorize,
 )
 
@@ -45,5 +46,6 @@ __all__ = [
     "Rgb",
     "VectorizerConfig",
     "VectorizerResult",
+    "set_log_level",
     "vectorize",
 ]

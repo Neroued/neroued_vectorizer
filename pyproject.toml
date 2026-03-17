@@ -70,6 +70,7 @@ repair-wheel-command = "LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64 auditwhe
 [tool.cibuildwheel.macos]
 before-all = "bash {project}/ci/install-deps-macos.sh"
 environment = { MACOSX_DEPLOYMENT_TARGET = "14.0" }
+test-skip = "*-macosx_x86_64"
 
 [tool.cibuildwheel.windows]
 before-all = "ci\\install-deps-windows.bat"

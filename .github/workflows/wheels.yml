@@ -16,8 +16,6 @@ jobs:
         include:
           - os: ubuntu-24.04
             arch: x86_64
-          - os: ubuntu-24.04
-            arch: aarch64
           - os: macos-14
             arch: "x86_64 arm64"
           - os: windows-latest
@@ -33,12 +31,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: echo "SETUPTOOLS_SCM_PRETEND_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-
-      - name: Set up QEMU (Linux aarch64)
-        if: matrix.arch == 'aarch64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
 
       - name: Cache vcpkg packages (Windows)
         if: runner.os == 'Windows'

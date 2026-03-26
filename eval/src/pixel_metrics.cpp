@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <vector>
 
 namespace neroued::vectorizer::eval {
@@ -146,7 +147,7 @@ DeltaEStats ComputeDeltaE(const cv::Mat& orig_bgr, const cv::Mat& rend_bgr, cons
 
 double ComputeHueCoverage(const cv::Mat& orig_lab, const cv::Mat& de_map, const cv::Mat& mask) {
     constexpr int kBins              = 36;
-    constexpr double kBinWidth       = 2.0 * M_PI / kBins;
+    constexpr double kBinWidth       = 2.0 * std::numbers::pi / kBins;
     constexpr double kMinBinFraction = 0.003;
     constexpr double kMaxBinDeltaE   = 15.0;
     constexpr double kMinChroma      = 5.0;
@@ -168,7 +169,7 @@ double ComputeHueCoverage(const cv::Mat& orig_lab, const cv::Mat& de_map, const 
             if (chroma < kMinChroma) continue;
 
             double hue = std::atan2(static_cast<double>(b_star), static_cast<double>(a_star));
-            if (hue < 0) hue += 2.0 * M_PI;
+            if (hue < 0) hue += 2.0 * std::numbers::pi;
             int bin = std::min(kBins - 1, static_cast<int>(hue / kBinWidth));
 
             bin_count[bin]++;

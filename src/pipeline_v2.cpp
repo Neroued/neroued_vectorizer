@@ -9,6 +9,7 @@
 #include "segment/color_segment.h"
 #include "stacking/depth_order.h"
 #include "stacking/shape_extend.h"
+#include "trace/coverage.h"
 #include "trace/potrace.h"
 
 #include <opencv2/imgproc.hpp>
@@ -128,7 +129,7 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
 
     // ── 5. Extract shape layers (connected components per label) ────────────
     auto layers = ExtractShapeLayers(labels, num_labels, cfg.min_contour_area);
-    labels.release();
+    // labels kept alive for ApplyCoverageGuard; released after step 10b.
     spdlog::info("V2 shape layers: {}", layers.size());
 
     if (layers.empty()) {
@@ -239,6 +240,23 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
 
     // ── 10. z-order safe same-color merge + fragment filtering ──────────────
     MergeSameColorShapesV2(shapes, cfg.min_contour_area);
+
+    // ── 10b. Coverage guard — patch uncovered pixels ────────────────────────
+    if (cfg.enable_coverage_fix) {
+        float min_ratio =
+            (num_labels > 2) ? std::min(cfg.min_coverage_ratio, 0.995f) : cfg.min_coverage_ratio;
+        float min_patch_area = std::max(1.f, cfg.min_contour_area * 0.5f);
+        size_t pre_patch     = shapes.size();
+        ApplyCoverageGuard(shapes, labels, palette, min_ratio, trace_eps, min_patch_area);
+        size_t num_patches = shapes.size() - pre_patch;
+        if (num_patches > 0) {
+            // Rotate patches to bottom of z-order so they only show through
+            // uncovered gaps, never painting over correct existing content.
+            std::rotate(shapes.begin(), shapes.begin() + static_cast<ptrdiff_t>(pre_patch),
+                        shapes.end());
+        }
+    }
+    labels.release();
 
     // ── 11. Rescale coordinates to original image size ──────────────────────
     if (scaled) {

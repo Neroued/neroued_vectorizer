@@ -8,7 +8,7 @@ on:
 jobs:
   # ── Build wheels on each platform ─────────────────────────────────────────
   build-wheels:
-    name: Wheels (${{ matrix.os }}, ${{ matrix.arch }})
+    name: Wheels (${{ matrix.id }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -16,10 +16,25 @@ jobs:
         include:
           - os: ubuntu-24.04
             arch: x86_64
+            cibw_build: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+            id: linux-x86_64
           - os: macos-14
-            arch: "x86_64 arm64"
+            arch: arm64
+            cibw_build: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+            id: macos-arm64
+          # Split Windows into parallel groups to reduce wall time
           - os: windows-latest
             arch: AMD64
+            cibw_build: "cp310-* cp311-*"
+            id: windows-py310-311
+          - os: windows-latest
+            arch: AMD64
+            cibw_build: "cp312-* cp313-*"
+            id: windows-py312-313
+          - os: windows-latest
+            arch: AMD64
+            cibw_build: "cp314-*"
+            id: windows-py314
 
     steps:
       - uses: actions/checkout@v4
@@ -40,14 +55,15 @@ jobs:
           key: vcpkg-win-${{ hashFiles('ci/install-deps-windows.bat', 'ci/potrace-CMakeLists.txt') }}
           restore-keys: vcpkg-win-
 
-      - uses: pypa/cibuildwheel@v2.23
+      - uses: pypa/cibuildwheel@v3.4.0
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_BUILD: ${{ matrix.cibw_build }}
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ env.SETUPTOOLS_SCM_PRETEND_VERSION }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+          name: wheels-${{ matrix.id }}
           path: wheelhouse/*.whl
           retention-days: 14
 

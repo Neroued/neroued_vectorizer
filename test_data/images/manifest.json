@@ -97,6 +97,13 @@
       "category": "complex",
       "vectorizer_overrides": {},
       "expectations": {}
+    },
+    {
+      "path": "complex/v2-450addc6c052c09b3478440adf85ae5c_r.jpg",
+      "name": "c_450ad",
+      "category": "complex",
+      "vectorizer_overrides": {},
+      "expectations": {}
     }
   ]
 }

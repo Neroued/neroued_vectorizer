@@ -8,10 +8,10 @@
 
 ## 特性
 
-- 7 阶段流水线：预处理 → 颜色分割 → 边界提取 → 轮廓装配 → 曲线拟合 → 轮廓追踪 → SVG 输出
-- 基于 Potrace 的位图追踪，Clipper2 拓扑修复
-- SLIC 超像素 + K-Means 自动调色板
-- Schneider 贝塞尔曲线拟合，亚像素边界细化
+- 双管线架构：V1（边界图 + 剪切模型）和 V2（层叠模型 + 深度排序）
+- V2 管线：OKLab MMCQ 感知量化、深度排序画家算法、形状延伸消除缝隙、路径优化、同色合并
+- V1 管线：SLIC 超像素 + K-Means、Schneider 曲线拟合、Potrace + Clipper2 拓扑修复
+- 亚像素边界细化
 - 薄线增强、抗锯齿边缘检测
 - 可选 ICC 色彩管理（lcms2）
 - 质量评估模块（PSNR / SSIM / Delta E / Chamfer 距离）
@@ -99,6 +99,7 @@ cmake --install build --prefix /usr/local
 | `--min-region` | 50 | 最小区域面积（像素²） |
 | `--upscale-short-edge` | 600 | 短边自动放大阈值 |
 | `--log-level` | info | 日志级别 |
+| `--pipeline` | v1 | 管线模式：v1 或 v2 |
 
 完整参数列表可通过 `--help` 查看。
 
@@ -168,6 +169,11 @@ config.num_colors = 8
 config.curve_fit_error = 1.0
 result = nv.vectorize("photo.png", config)
 
+# 使用 V2 层叠管线
+config = nv.VectorizerConfig()
+config.pipeline_mode = nv.PipelineMode.V2
+result = nv.vectorize("photo.png", config)
+
 # 使用结果
 print(result.svg_content)       # SVG 文档字符串
 print(result.width, result.height)
@@ -229,6 +235,8 @@ std::ofstream("output.svg") << result.svg_content;
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
+| **管线选择** | | | |
+| `pipeline_mode` | PipelineMode | V1 | 管线实现：V1（经典边界图）或 V2（层叠模型） |
 | **颜色分割** | | | |
 | `num_colors` | int | 0 | 调色板颜色数，0 = 自动检测 |
 | `min_region_area` | int | 50 | 最小区域面积（像素²） |
@@ -297,8 +305,10 @@ neroued_vectorizer/
 │   ├── segment/                  # 颜色分割（SLIC、K-Means、形态学）
 │   ├── boundary/                 # 边界提取（图构建、亚像素、AA检测）
 │   ├── contour/                  # 轮廓装配（链式装配、薄线）
-│   ├── curve/                    # 曲线拟合（贝塞尔、Schneider）
+│   ├── curve/                    # 曲线拟合（贝塞尔、Schneider、路径优化）
 │   ├── trace/                    # 追踪（Potrace、覆盖率、拓扑修复）
+│   ├── stacking/                 # V2 层叠模型（深度排序、形状延伸）
+│   ├── quantize/                 # V2 OKLab MMCQ 颜色量化
 │   ├── output/                   # 输出（SVG 写入、形状合并）
 │   └── detail/                   # 内部工具（cv_utils、icc_utils）
 ├── python/                       # Python 绑定

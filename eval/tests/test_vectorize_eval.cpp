@@ -125,39 +125,42 @@ TEST(Scoring, PerfectScore) {
     VectorizeMetrics m;
     m.coverage            = 1.0;
     m.delta_e_mean        = 0;
+    m.delta_e_p95         = 0;
     m.border_delta_e_mean = 0;
     m.overlap             = 0;
     m.ssim                = 1.0;
     m.edge_f1             = 1.0;
     m.tiny_fragment_rate  = 0;
+    m.hue_coverage        = 1.0;
 
     double score = ComputeScore(m);
-    // fidelity = (0.7*1.0 + 0.3*1.0) * (1 - 0.15*0) = 1.0  -> 40*1 = 40
-    // structure = 1.0 -> 30, edge = 1.0 -> 15, efficiency = 1.0 -> 15
-    // total = 100
+    // mean_f=1.0, p95_f=1.0 -> base=1.0, border=1.0
+    // fidelity = 1.0 * (1-0) * (1-0) = 1.0 -> 40
+    // structure=30, edge=15, efficiency=15 -> total=100
     EXPECT_NEAR(score, 100.0, 0.01);
 }
 
 TEST(Scoring, DegradedScore) {
     VectorizeMetrics m;
     m.delta_e_mean        = 20.0;
+    m.delta_e_p95         = 50.0;
     m.border_delta_e_mean = 30.0;
     m.overlap             = 0.4;
     m.ssim                = 0.5;
     m.edge_f1             = 0.7;
     m.coverage            = 0.95;
     m.tiny_fragment_rate  = 0.8;
+    m.hue_coverage        = 0.75;
 
     ScoreWeights w;
     double score = ComputeScore(m, w);
-    // base_fidelity = max(0, 1 - 20/40) = 0.5
-    // border_factor = max(0, 1 - 30/60) = 0.5
-    // fidelity = (0.7*0.5 + 0.3*0.5) * (1 - 0.15*0.4) = 0.5 * 0.94 = 0.47  -> 40*0.47 = 18.8
-    // structure = 0.5 -> 30*0.5 = 15.0
-    // edge = 0.7 -> 15*0.7 = 10.5
-    // efficiency = (1-0.8)*0.95 = 0.19 -> 15*0.19 = 2.85
-    // total = 47.15
-    EXPECT_NEAR(score, 47.15, 0.1);
+    // mean_f = 1-20/40 = 0.5, p95_f = 1-50/80 = 0.375
+    // base_fidelity = 0.7*0.5 + 0.3*0.375 = 0.4625
+    // border_factor = 1-30/60 = 0.5
+    // fidelity = (0.7*0.4625 + 0.3*0.5) * (1-0.15*0.4) * (1-0.2*0.25)
+    //          = 0.47375 * 0.94 * 0.95 = 0.42306 -> 40*0.42306 = 16.92
+    // structure=15.0, edge=10.5, efficiency=2.85 -> total=45.27
+    EXPECT_NEAR(score, 45.27, 0.1);
     EXPECT_GT(score, 0.0);
     EXPECT_LT(score, 100.0);
 }

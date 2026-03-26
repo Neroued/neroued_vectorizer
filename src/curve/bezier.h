@@ -22,7 +22,8 @@ struct CurveSegment {
 
 struct BezierContour {
     std::vector<CubicBezier> segments;
-    bool closed = true;
+    bool closed  = true;
+    bool is_hole = false;
 };
 
 /// Evaluate a cubic Bezier curve at parameter t in [0,1].

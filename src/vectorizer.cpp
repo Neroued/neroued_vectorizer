@@ -54,7 +54,9 @@ VectorizerResult Vectorize(const std::string& image_path, const VectorizerConfig
             spdlog::error("Vectorize(file) failed: prepared image empty, path='{}'", image_path);
             throw std::runtime_error("Failed to load image: " + image_path);
         }
-        auto result = detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
+        auto result = (config.pipeline_mode == PipelineMode::V2)
+                          ? detail::RunPipelineV2(prepared.bgr, config, prepared.opaque_mask)
+                          : detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
         const auto elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
                 .count();
@@ -85,7 +87,9 @@ VectorizerResult Vectorize(const uint8_t* image_data, size_t image_size,
             spdlog::error("Vectorize(buffer) failed: prepared image empty, bytes={}", image_size);
             throw std::runtime_error("Failed to decode image buffer");
         }
-        auto result = detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
+        auto result = (config.pipeline_mode == PipelineMode::V2)
+                          ? detail::RunPipelineV2(prepared.bgr, config, prepared.opaque_mask)
+                          : detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
         const auto elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
                 .count();
@@ -115,7 +119,9 @@ VectorizerResult Vectorize(const cv::Mat& bgr_image, const VectorizerConfig& con
             spdlog::error("Vectorize(mat) failed: empty input image");
             throw std::runtime_error("Empty input image");
         }
-        auto result = detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
+        auto result = (config.pipeline_mode == PipelineMode::V2)
+                          ? detail::RunPipelineV2(prepared.bgr, config, prepared.opaque_mask)
+                          : detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
         const auto elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
                 .count();

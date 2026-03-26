@@ -19,13 +19,19 @@ namespace neroued::vectorizer {
 // ── Scoring ──────────────────────────────────────────────────────────────────
 
 double ComputeScore(const VectorizeMetrics& m, const ScoreWeights& w) {
-    double base_fidelity = std::max(0.0, 1.0 - m.delta_e_mean / w.delta_e_ceiling);
+    double mean_fidelity = std::max(0.0, 1.0 - m.delta_e_mean / w.delta_e_ceiling);
+    double p95_fidelity  = std::max(0.0, 1.0 - m.delta_e_p95 / w.delta_e_p95_ceiling);
+    double base_fidelity = (1.0 - w.p95_weight) * mean_fidelity + w.p95_weight * p95_fidelity;
+
     double border_factor = std::max(0.0, 1.0 - m.border_delta_e_mean / (w.delta_e_ceiling * 1.5));
     double fidelity =
         (1.0 - w.border_delta_e_weight) * base_fidelity + w.border_delta_e_weight * border_factor;
 
     double overlap_penalty = std::clamp(m.overlap, 0.0, 1.0);
     fidelity *= (1.0 - w.overlap_penalty_weight * overlap_penalty);
+
+    double hue_penalty = w.hue_coverage_weight * (1.0 - std::clamp(m.hue_coverage, 0.0, 1.0));
+    fidelity *= (1.0 - hue_penalty);
 
     double structure  = std::clamp(m.ssim, 0.0, 1.0);
     double edge       = std::clamp(m.edge_f1, 0.0, 1.0);

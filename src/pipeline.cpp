@@ -249,6 +249,7 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
                 for (auto& hole : g.holes) {
                     double hole_area = std::abs(BezierContourSignedArea(hole));
                     if (hole_area < static_cast<double>(cfg.min_hole_area)) continue;
+                    hole.is_hole = true;
                     shape.contours.push_back(std::move(hole));
                 }
                 if (!shape.contours.empty()) {
@@ -292,6 +293,7 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
                 for (auto& hole : g.holes) {
                     double hole_area = std::abs(BezierContourSignedArea(hole));
                     if (hole_area < static_cast<double>(cfg.min_hole_area)) continue;
+                    hole.is_hole = true;
                     shape.contours.push_back(std::move(hole));
                 }
                 if (!shape.contours.empty()) {

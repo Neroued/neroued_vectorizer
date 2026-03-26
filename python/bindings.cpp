@@ -89,6 +89,14 @@ PYBIND11_MODULE(_core, m) {
             return os.str();
         });
 
+    // ── PipelineMode ──────────────────────────────────────────────────────
+    py::enum_<PipelineMode>(m, "PipelineMode",
+                            "Pipeline implementation selector.\n\n"
+                            "V1: Original boundary-graph + cutout pipeline.\n"
+                            "V2: Stacking model with per-layer Potrace and depth ordering.")
+        .value("V1", PipelineMode::V1, "Original boundary-graph + cutout pipeline.")
+        .value("V2", PipelineMode::V2, "Stacking model: per-layer Potrace with depth ordering.");
+
     // ── VectorizerConfig ─────────────────────────────────────────────────────
     auto cfg = py::class_<VectorizerConfig>(
         m, "VectorizerConfig",
@@ -101,6 +109,10 @@ PYBIND11_MODULE(_core, m) {
         "    result = vectorize('image.png', cfg)\n");
 
     cfg.def(py::init<>(), "Create a config with default values.");
+
+    // Pipeline mode
+    cfg.def_readwrite("pipeline_mode", &VectorizerConfig::pipeline_mode,
+                      "Pipeline implementation: PipelineMode.V1 (default) or PipelineMode.V2.");
 
     // Color segmentation
     cfg.def_readwrite("num_colors", &VectorizerConfig::num_colors,
@@ -180,9 +192,10 @@ PYBIND11_MODULE(_core, m) {
 
     cfg.def("__repr__", [](const VectorizerConfig& c) {
         std::ostringstream os;
-        os << "VectorizerConfig(num_colors=" << c.num_colors << ", smoothness=" << c.smoothness
-           << ", curve_fit_error=" << c.curve_fit_error << ", detail_level=" << c.detail_level
-           << ", ...)";
+        os << "VectorizerConfig(pipeline_mode="
+           << (c.pipeline_mode == PipelineMode::V2 ? "V2" : "V1") << ", num_colors=" << c.num_colors
+           << ", smoothness=" << c.smoothness << ", curve_fit_error=" << c.curve_fit_error
+           << ", detail_level=" << c.detail_level << ", ...)";
         return os.str();
     });
 

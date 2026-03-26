@@ -60,6 +60,7 @@ void PrintUsage(const char* exe) {
                 "  --merge-tolerance F       Near-linear segment merge tolerance\n"
                 "  --enable-antialias        Enable AA mixed-edge detection\n"
                 "  --aa-tolerance F          AA blend detection LAB tolerance\n"
+                "  --pipeline MODE           Pipeline: v1 (default) or v2 (stacking model)\n"
                 "  --log-level LEVEL         trace/debug/info/warn/error/off (default info)\n",
                 exe, exe);
 }
@@ -182,6 +183,18 @@ bool ParseArgs(int argc, char** argv, Options& opt) {
         }
         if (arg == "--enable-antialias") {
             opt.vec_overrides.enable_antialias_detect = true;
+            continue;
+        }
+        if (arg == "--pipeline" && i + 1 < argc) {
+            std::string mode = argv[++i];
+            if (mode == "v1")
+                opt.vec_overrides.pipeline_mode = PipelineMode::V1;
+            else if (mode == "v2")
+                opt.vec_overrides.pipeline_mode = PipelineMode::V2;
+            else {
+                std::fprintf(stderr, "Invalid --pipeline: %s (use v1 or v2)\n", mode.c_str());
+                return false;
+            }
             continue;
         }
 

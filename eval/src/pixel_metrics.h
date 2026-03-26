@@ -11,8 +11,10 @@ struct PixelMetricsResult {
     double overlap             = 0;
     double delta_e_mean        = 0;
     double delta_e_p95         = 0;
+    double delta_e_p99         = 0;
     double delta_e_max         = 0;
     double border_delta_e_mean = 0;
+    double hue_coverage        = 1.0;
 };
 
 /// Compute pixel-level fidelity metrics.

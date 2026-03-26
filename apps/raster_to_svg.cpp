@@ -43,6 +43,7 @@ struct Options {
     bool svg_stroke                 = true;
     float svg_stroke_w              = 0.5f;
     std::string log_level           = "info";
+    std::string pipeline            = "v1";
 };
 
 void PrintUsage(const char* exe) {
@@ -78,7 +79,8 @@ void PrintUsage(const char* exe) {
                 "  --aa-tolerance F    AA blend detection LAB tolerance (default 10)\n"
                 "  --no-svg-stroke     Disable SVG stroke output (default on)\n"
                 "  --svg-stroke-w F    SVG stroke width when enabled (default 0.5)\n"
-                "  --log-level LEVEL   Log level: trace/debug/info/warn/error/off (default info)\n",
+                "  --log-level LEVEL   Log level: trace/debug/info/warn/error/off (default info)\n"
+                "  --pipeline MODE     Pipeline: v1 (default) or v2 (stacking model)\n",
                 exe);
 }
 
@@ -308,6 +310,14 @@ bool ParseArgs(int argc, char** argv, Options& opt) {
             opt.log_level = argv[++i];
             continue;
         }
+        if (arg == "--pipeline" && i + 1 < argc) {
+            opt.pipeline = argv[++i];
+            if (opt.pipeline != "v1" && opt.pipeline != "v2") {
+                std::fprintf(stderr, "Invalid --pipeline (must be v1 or v2)\n");
+                return false;
+            }
+            continue;
+        }
         std::fprintf(stderr, "Unknown argument: %s\n", arg.c_str());
         PrintUsage(argv[0]);
         return false;
@@ -365,8 +375,10 @@ int main(int argc, char** argv) {
         cfg.aa_tolerance              = opt.aa_tolerance;
         cfg.svg_enable_stroke         = opt.svg_stroke;
         cfg.svg_stroke_width          = opt.svg_stroke_w;
+        cfg.pipeline_mode = (opt.pipeline == "v2") ? PipelineMode::V2 : PipelineMode::V1;
 
-        spdlog::info("Vectorizing {} -> {}", opt.image_path, opt.out_path);
+        spdlog::info("Vectorizing {} -> {} [pipeline={}]", opt.image_path, opt.out_path,
+                     opt.pipeline);
         spdlog::info("Colors={}, contour_simplify={:.2f}, edge_sensitivity={:.2f}, "
                      "refine_passes={}, max_merge_color_dist={:.1f}",
                      cfg.num_colors, cfg.contour_simplify, cfg.edge_sensitivity, cfg.refine_passes,

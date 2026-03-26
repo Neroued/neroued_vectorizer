@@ -5,8 +5,16 @@
 
 namespace neroued::vectorizer {
 
+/// Pipeline implementation selector.
+enum class PipelineMode {
+    V1, ///< Original boundary-graph + cutout pipeline.
+    V2, ///< Stacking model: per-layer Potrace with depth ordering.
+};
+
 /// Configuration for the vectorization pipeline.
 struct VectorizerConfig {
+    PipelineMode pipeline_mode = PipelineMode::V1; ///< Which pipeline implementation to use.
+
     // ── Color segmentation ──────────────────────────────────────────────────
     int num_colors      = 0;  ///< K-Means palette size. 0 = auto-detect optimal count.
     int min_region_area = 50; ///< Force-merge regions smaller than this (pixels²).

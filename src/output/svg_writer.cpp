@@ -94,7 +94,7 @@ std::string ContoursToSvgPath(const std::vector<BezierContour>& contours) {
         auto& contour = contours[ci];
         if (contour.segments.empty()) continue;
 
-        if (ci == 0) {
+        if (!contour.is_hole) {
             s += BezierToSvgPath(contour);
         } else {
             auto& segs = contour.segments;

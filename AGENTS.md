@@ -11,11 +11,19 @@
 
 ## 项目全景
 
-本库实现栅格到 SVG 矢量化的完整管线，按 7 个阶段组织：
+本库实现栅格到 SVG 矢量化的完整管线，支持两种管线模式：
 
+**V1（默认）**：边界图 + 剪切模型
 ```
 输入图像 → [预处理] → [颜色分割] → [边界提取] → [轮廓装配] → [曲线拟合] → [轮廓追踪] → [SVG输出]
 ```
+
+**V2（层叠模型）**：深度排序 + 画家算法
+```
+输入图像 → [预处理] → [OKLab MMCQ量化] → [小区域合并] → [连通域提取] → [深度排序] → [形状延伸] → [逐层Potrace] → [路径优化] → [同色合并] → [SVG输出]
+```
+
+通过 `VectorizerConfig::pipeline_mode` 选择 `PipelineMode::V1` 或 `PipelineMode::V2`。
 
 ### 目录映射
 
@@ -24,8 +32,10 @@
 - `src/segment/`：SLIC 超像素、K-Means 聚类、形态学清理、小区域合并
 - `src/boundary/`：像素级边界图构建、亚像素细化、抗锯齿边缘检测
 - `src/contour/`：链式轮廓装配、薄线矢量化
-- `src/curve/`：贝塞尔工具函数、Schneider 曲线拟合
+- `src/curve/`：贝塞尔工具函数、Schneider 曲线拟合、路径优化（V2）
 - `src/trace/`：Potrace 位图追踪、覆盖率修补、Clipper2 拓扑修复
+- `src/stacking/`：V2 层叠模型（深度排序、形状延伸）
+- `src/quantize/`：V2 OKLab MMCQ 颜色量化
 - `src/output/`：SVG 文档生成、同色形状合并
 - `src/detail/`：内部工具（OpenCV 辅助、ICC 色彩管理）
 - `python/`：Python 绑定（pybind11 绑定代码、Python 包、测试）
@@ -47,7 +57,12 @@
 | 修改 Potrace 追踪行为 | `src/trace/potrace.cpp` |
 | 修改覆盖率修补逻辑 | `src/trace/coverage.cpp` |
 | 修改拓扑修复策略 | `src/trace/topology.cpp` |
-| 调整管线编排流程 | `src/pipeline.cpp` |
+| 调整 V1 管线编排流程 | `src/pipeline.cpp` |
+| 调整 V2 管线编排流程 | `src/pipeline_v2.cpp` |
+| 修改 V2 深度排序逻辑 | `src/stacking/depth_order.cpp` |
+| 修改 V2 形状延伸策略 | `src/stacking/shape_extend.cpp` |
+| 修改 V2 OKLab 颜色量化 | `src/quantize/color_quantize.cpp`、`src/quantize/oklab.h` |
+| 修改 V2 路径优化 | `src/curve/path_optimize.cpp` |
 | 新增/修改公共 API | `include/neroued/vectorizer/vectorizer.h`、`src/vectorizer.cpp` |
 | 新增/修改配置参数 | `include/neroued/vectorizer/config.h` |
 | 修改质量评估指标 | `eval/src/pixel_metrics.cpp`、`eval/src/edge_metrics.cpp`、`eval/src/path_metrics.cpp` |
@@ -64,7 +79,7 @@
 | 文件 | 内容 |
 |------|------|
 | `vectorizer.h` | 3 个 `Vectorize` 重载（文件路径 / 内存缓冲区 / cv::Mat） |
-| `config.h` | `VectorizerConfig` — 管线完整配置 |
+| `config.h` | `PipelineMode` 枚举、`VectorizerConfig` — 管线完整配置 |
 | `result.h` | `VectorizerResult` — SVG 内容、尺寸、形状数、调色板 |
 | `color.h` | `Rgb`、`Lab` 颜色类型及空间转换 |
 | `vec2.h` / `vec3.h` | 2D/3D 向量类型 |

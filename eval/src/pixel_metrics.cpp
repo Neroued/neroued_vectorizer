@@ -3,6 +3,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -78,20 +79,22 @@ double ComputeSsim(const cv::Mat& a, const cv::Mat& b, const cv::Mat& mask) {
 struct DeltaEStats {
     double mean    = 0;
     double p95     = 0;
+    double p99     = 0;
     double max_val = 0;
 };
 
-DeltaEStats ComputeDeltaE(const cv::Mat& orig_bgr, const cv::Mat& rend_bgr, const cv::Mat& mask) {
+DeltaEStats ComputeDeltaE(const cv::Mat& orig_bgr, const cv::Mat& rend_bgr, const cv::Mat& mask,
+                          cv::Mat* out_orig_lab = nullptr, cv::Mat* out_de_map = nullptr) {
     cv::Mat orig_f, rend_f;
     orig_bgr.convertTo(orig_f, CV_32FC3, 1.0 / 255.0);
     rend_bgr.convertTo(rend_f, CV_32FC3, 1.0 / 255.0);
 
-    cv::Mat orig32, rend32;
-    cv::cvtColor(orig_f, orig32, cv::COLOR_BGR2Lab);
-    cv::cvtColor(rend_f, rend32, cv::COLOR_BGR2Lab);
+    cv::Mat orig_lab, rend_lab;
+    cv::cvtColor(orig_f, orig_lab, cv::COLOR_BGR2Lab);
+    cv::cvtColor(rend_f, rend_lab, cv::COLOR_BGR2Lab);
 
     cv::Mat diff;
-    cv::subtract(orig32, rend32, diff);
+    cv::subtract(orig_lab, rend_lab, diff);
     cv::Mat diff_sq;
     cv::multiply(diff, diff, diff_sq);
 
@@ -113,7 +116,6 @@ DeltaEStats ComputeDeltaE(const cv::Mat& orig_bgr, const cv::Mat& rend_bgr, cons
         stats.mean = cv::mean(de)[0];
     }
 
-    // p95 via partial sort (only over masked pixels)
     std::vector<float> vals;
     vals.reserve(de.rows * de.cols);
     const uchar* mask_data = mask.empty() ? nullptr : mask.ptr<uchar>();
@@ -125,12 +127,66 @@ DeltaEStats ComputeDeltaE(const cv::Mat& orig_bgr, const cv::Mat& rend_bgr, cons
         }
     }
     if (!vals.empty()) {
+        size_t idx99 = static_cast<size_t>(vals.size() * 0.99);
+        if (idx99 >= vals.size()) idx99 = vals.size() - 1;
+        std::nth_element(vals.begin(), vals.begin() + static_cast<long>(idx99), vals.end());
+        stats.p99 = vals[idx99];
+
         size_t idx95 = static_cast<size_t>(vals.size() * 0.95);
         if (idx95 >= vals.size()) idx95 = vals.size() - 1;
         std::nth_element(vals.begin(), vals.begin() + static_cast<long>(idx95), vals.end());
         stats.p95 = vals[idx95];
     }
+
+    if (out_orig_lab) *out_orig_lab = std::move(orig_lab);
+    if (out_de_map) *out_de_map = std::move(de);
+
     return stats;
+}
+
+double ComputeHueCoverage(const cv::Mat& orig_lab, const cv::Mat& de_map, const cv::Mat& mask) {
+    constexpr int kBins              = 36;
+    constexpr double kBinWidth       = 2.0 * M_PI / kBins;
+    constexpr double kMinBinFraction = 0.003;
+    constexpr double kMaxBinDeltaE   = 15.0;
+    constexpr double kMinChroma      = 5.0;
+
+    std::array<int, kBins> bin_count{};
+    std::array<double, kBins> bin_de_sum{};
+    int total_chromatic = 0;
+
+    const uchar* mask_ptr = mask.empty() ? nullptr : mask.ptr<uchar>();
+    for (int r = 0; r < orig_lab.rows; ++r) {
+        const auto* lab_row = orig_lab.ptr<cv::Vec3f>(r);
+        const float* de_row = de_map.ptr<float>(r);
+        const uchar* m_row  = mask_ptr ? mask.ptr<uchar>(r) : nullptr;
+        for (int c = 0; c < orig_lab.cols; ++c) {
+            if (m_row && !m_row[c]) continue;
+            float a_star  = lab_row[c][1];
+            float b_star  = lab_row[c][2];
+            double chroma = std::sqrt(a_star * a_star + b_star * b_star);
+            if (chroma < kMinChroma) continue;
+
+            double hue = std::atan2(static_cast<double>(b_star), static_cast<double>(a_star));
+            if (hue < 0) hue += 2.0 * M_PI;
+            int bin = std::min(kBins - 1, static_cast<int>(hue / kBinWidth));
+
+            bin_count[bin]++;
+            bin_de_sum[bin] += de_row[c];
+            total_chromatic++;
+        }
+    }
+
+    if (total_chromatic == 0) return 1.0;
+
+    int significant = 0, covered = 0;
+    double threshold = total_chromatic * kMinBinFraction;
+    for (int i = 0; i < kBins; ++i) {
+        if (bin_count[i] < threshold) continue;
+        significant++;
+        if (bin_de_sum[i] / bin_count[i] < kMaxBinDeltaE) covered++;
+    }
+    return significant > 0 ? static_cast<double>(covered) / significant : 1.0;
 }
 
 double ComputeBorderDeltaE(const cv::Mat& orig_bgr, const cv::Mat& rend_bgr,
@@ -199,10 +255,14 @@ PixelMetricsResult ComputePixelMetrics(const cv::Mat& original, const cv::Mat& r
     r.overlap =
         static_cast<double>(cv::countNonZero(overlap_mask)) / static_cast<double>(total_valid);
 
-    auto de        = ComputeDeltaE(original, rendered, alpha_mask);
+    cv::Mat orig_lab, de_map;
+    auto de        = ComputeDeltaE(original, rendered, alpha_mask, &orig_lab, &de_map);
     r.delta_e_mean = de.mean;
     r.delta_e_p95  = de.p95;
+    r.delta_e_p99  = de.p99;
     r.delta_e_max  = de.max_val;
+
+    r.hue_coverage = ComputeHueCoverage(orig_lab, de_map, alpha_mask);
 
     r.border_delta_e_mean = ComputeBorderDeltaE(original, rendered, coverage, alpha_mask);
 

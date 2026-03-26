@@ -44,6 +44,7 @@ struct PartialVectorizerConfig {
     std::optional<float> merge_segment_tolerance;
     std::optional<bool> enable_antialias_detect;
     std::optional<float> aa_tolerance;
+    std::optional<PipelineMode> pipeline_mode;
 
     /// Apply set fields onto \p base, returning the merged config.
     VectorizerConfig MergeInto(const VectorizerConfig& base) const;
@@ -74,8 +75,10 @@ struct VectorizeMetrics {
     double overlap             = 0;
     double delta_e_mean        = 0;
     double delta_e_p95         = 0;
+    double delta_e_p99         = 0;
     double delta_e_max         = 0;
     double border_delta_e_mean = 0;
+    double hue_coverage        = 1.0;
 
     // Edge fidelity
     double edge_f1          = 0;
@@ -156,8 +159,11 @@ struct ScoreWeights {
     double edge                   = 15;
     double efficiency             = 15;
     double delta_e_ceiling        = 40;
+    double delta_e_p95_ceiling    = 80;
+    double p95_weight             = 0.3;
     double overlap_penalty_weight = 0.15;
     double border_delta_e_weight  = 0.3;
+    double hue_coverage_weight    = 0.2;
 };
 
 double ComputeScore(const VectorizeMetrics& m, const ScoreWeights& w = {});

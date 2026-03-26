@@ -60,6 +60,7 @@ VectorizerConfig PartialVectorizerConfig::MergeInto(const VectorizerConfig& base
     MERGE_FIELD(merge_segment_tolerance);
     MERGE_FIELD(enable_antialias_detect);
     MERGE_FIELD(aa_tolerance);
+    MERGE_FIELD(pipeline_mode);
 #undef MERGE_FIELD
     return out;
 }
@@ -77,9 +78,11 @@ std::string VectorizeMetrics::ToJson(int indent) const {
     ss << ind << "\"overlap\": " << std::setprecision(4) << overlap << ",\n";
     ss << ind << "\"delta_e_mean\": " << std::setprecision(2) << delta_e_mean << ",\n";
     ss << ind << "\"delta_e_p95\": " << std::setprecision(2) << delta_e_p95 << ",\n";
+    ss << ind << "\"delta_e_p99\": " << std::setprecision(2) << delta_e_p99 << ",\n";
     ss << ind << "\"delta_e_max\": " << std::setprecision(2) << delta_e_max << ",\n";
     ss << ind << "\"border_delta_e_mean\": " << std::setprecision(2) << border_delta_e_mean
        << ",\n";
+    ss << ind << "\"hue_coverage\": " << std::setprecision(4) << hue_coverage << ",\n";
     ss << ind << "\"edge_f1\": " << std::setprecision(4) << edge_f1 << ",\n";
     ss << ind << "\"chamfer_distance\": " << std::setprecision(2) << chamfer_distance << ",\n";
     ss << ind << "\"total_shapes\": " << total_shapes << ",\n";
@@ -460,8 +463,10 @@ ImageResult EvaluateSingleEntry(const ImageEntry& entry, const EvalConfig& confi
     m.overlap                = px.overlap;
     m.delta_e_mean           = px.delta_e_mean;
     m.delta_e_p95            = px.delta_e_p95;
+    m.delta_e_p99            = px.delta_e_p99;
     m.delta_e_max            = px.delta_e_max;
     m.border_delta_e_mean    = px.border_delta_e_mean;
+    m.hue_coverage           = px.hue_coverage;
     m.edge_f1                = em.edge_f1;
     m.chamfer_distance       = em.chamfer_distance;
     m.total_shapes           = pm.total_shapes;

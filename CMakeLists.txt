@@ -129,7 +129,12 @@ add_library(neroued_vectorizer STATIC
     src/trace/topology.cpp
     src/output/svg_writer.cpp
     src/output/shape_merge.cpp
-    src/detail/icc_utils.cpp)
+    src/detail/icc_utils.cpp
+    src/pipeline_v2.cpp
+    src/stacking/depth_order.cpp
+    src/stacking/shape_extend.cpp
+    src/quantize/color_quantize.cpp
+    src/curve/path_optimize.cpp)
 
 add_library(neroued::vectorizer ALIAS neroued_vectorizer)
 

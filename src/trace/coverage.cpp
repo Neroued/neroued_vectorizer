@@ -166,7 +166,11 @@ void ApplyCoverageGuard(std::vector<VectorizedShape>& shapes, const cv::Mat& lab
             patch.color = palette[best_label];
             patch.area  = g.area;
             patch.contours.push_back(RingToBezier(g.outer));
-            for (const auto& hole : g.holes) patch.contours.push_back(RingToBezier(hole));
+            for (const auto& hole : g.holes) {
+                auto hc    = RingToBezier(hole);
+                hc.is_hole = true;
+                patch.contours.push_back(std::move(hc));
+            }
             if (patch.contours.empty()) continue;
 
             cv::Mat patch_raster(h, w, CV_8UC1, cv::Scalar(0));

@@ -2,7 +2,6 @@
 
 #include <opencv2/imgproc.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -51,55 +50,13 @@ cv::Mat FillShapeWithHoles(const std::vector<std::vector<cv::Point>>& contours, 
     if (contours.empty() || width <= 0 || height <= 0)
         return cv::Mat::zeros(height, width, CV_8UC1);
 
-    struct ContourInfo {
-        size_t index;
-        double abs_area;
-        cv::Rect bbox;
-        bool is_hole = false;
-    };
-
-    std::vector<ContourInfo> infos;
-    infos.reserve(contours.size());
-    for (size_t i = 0; i < contours.size(); ++i) {
-        if (contours[i].size() < 3) continue;
-        ContourInfo ci;
-        ci.index    = i;
-        ci.abs_area = std::abs(PolylineSignedArea(contours[i]));
-        ci.bbox     = cv::boundingRect(contours[i]);
-        infos.push_back(ci);
-    }
-
-    std::sort(infos.begin(), infos.end(),
-              [](const ContourInfo& a, const ContourInfo& b) { return a.abs_area > b.abs_area; });
-
-    for (size_t i = 0; i < infos.size(); ++i) {
-        if (i == 0) {
-            infos[i].is_hole = false;
-            continue;
-        }
-        cv::Point center(infos[i].bbox.x + infos[i].bbox.width / 2,
-                         infos[i].bbox.y + infos[i].bbox.height / 2);
-        bool found = false;
-        for (size_t j = 0; j < i; ++j) {
-            if (!(infos[i].bbox.x >= infos[j].bbox.x && infos[i].bbox.y >= infos[j].bbox.y &&
-                  infos[i].bbox.br().x <= infos[j].bbox.br().x &&
-                  infos[i].bbox.br().y <= infos[j].bbox.br().y))
-                continue;
-            if (PointInPolyline(contours[infos[j].index], center)) {
-                infos[i].is_hole = !infos[j].is_hole;
-                found            = true;
-                break;
-            }
-        }
-        if (!found) infos[i].is_hole = false;
-    }
-
-    // Fill outers with 255, erase holes with 0 — processed largest-first
-    // so nested structures (bullseye, etc.) resolve correctly.
     cv::Mat result = cv::Mat::zeros(height, width, CV_8UC1);
-    for (auto& ci : infos) {
-        std::vector<std::vector<cv::Point>> single = {contours[ci.index]};
-        cv::fillPoly(result, single, ci.is_hole ? cv::Scalar(0) : cv::Scalar(255));
+    for (auto& contour : contours) {
+        if (contour.size() < 3) continue;
+        cv::Mat single                           = cv::Mat::zeros(height, width, CV_8UC1);
+        std::vector<std::vector<cv::Point>> wrap = {contour};
+        cv::fillPoly(single, wrap, cv::Scalar(255));
+        cv::bitwise_xor(result, single, result);
     }
     return result;
 }

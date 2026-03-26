@@ -23,7 +23,7 @@ struct PairHash {
 
 using AdjSet = std::unordered_set<std::pair<int, int>, PairHash>;
 
-AdjSet BuildAdjacency(const std::vector<ShapeLayer>& layers, int img_rows, int img_cols) {
+cv::Mat BuildLayerMap(const std::vector<ShapeLayer>& layers, int img_rows, int img_cols) {
     cv::Mat layer_map(img_rows, img_cols, CV_32SC1, cv::Scalar(-1));
     for (int i = 0; i < static_cast<int>(layers.size()); ++i) {
         const auto& bbox = layers[i].bbox;
@@ -36,7 +36,10 @@ AdjSet BuildAdjacency(const std::vector<ShapeLayer>& layers, int img_rows, int i
             }
         }
     }
+    return layer_map;
+}
 
+AdjSet BuildAdjacency(const cv::Mat& layer_map, int img_rows, int img_cols) {
     AdjSet adj;
     for (int r = 0; r < img_rows; ++r) {
         const auto* row = layer_map.ptr<int>(r);
@@ -60,7 +63,8 @@ AdjSet BuildAdjacency(const std::vector<ShapeLayer>& layers, int img_rows, int i
     return adj;
 }
 
-int FindBackground(const std::vector<ShapeLayer>& layers, int img_rows, int img_cols) {
+int FindBackground(const std::vector<ShapeLayer>& layers, int img_rows, int img_cols,
+                   const cv::Mat& layer_map) {
     const int N = static_cast<int>(layers.size());
     std::vector<bool> touches_top(N, false), touches_bottom(N, false);
     std::vector<bool> touches_left(N, false), touches_right(N, false);
@@ -90,6 +94,22 @@ int FindBackground(const std::vector<ShapeLayer>& layers, int img_rows, int img_
         }
     }
 
+    constexpr int kBorderWidth = 3;
+    std::vector<int> border_px(N, 0);
+    int total_border_px = 0;
+    for (int r = 0; r < img_rows; ++r) {
+        if (r >= kBorderWidth && r < img_rows - kBorderWidth) continue;
+        const auto* row = layer_map.ptr<int>(r);
+        for (int c = 0; c < img_cols; ++c) {
+            if (r >= kBorderWidth && c >= kBorderWidth && c < img_cols - kBorderWidth) continue;
+            int idx = row[c];
+            if (idx >= 0) {
+                border_px[idx]++;
+                total_border_px++;
+            }
+        }
+    }
+
     int best         = -1;
     double best_area = -1.0;
     for (int i = 0; i < N; ++i) {
@@ -102,12 +122,23 @@ int FindBackground(const std::vector<ShapeLayer>& layers, int img_rows, int img_
     }
     if (best >= 0) return best;
 
+    double max_area = 0.0;
+    for (int i = 0; i < N; ++i) max_area = std::max(max_area, layers[i].area);
+
+    double best_score = -1.0;
     for (int i = 0; i < N; ++i) {
         int sides = static_cast<int>(touches_top[i]) + static_cast<int>(touches_bottom[i]) +
                     static_cast<int>(touches_left[i]) + static_cast<int>(touches_right[i]);
-        if (sides >= 2 && layers[i].area > best_area) {
-            best      = i;
-            best_area = layers[i].area;
+        if (sides < 2) continue;
+        double side_ratio = sides / 4.0;
+        double area_ratio = (max_area > 0.0) ? layers[i].area / max_area : 0.0;
+        double border_ratio =
+            (total_border_px > 0) ? static_cast<double>(border_px[i]) / total_border_px : 0.0;
+
+        double score = side_ratio * 0.3 + area_ratio * 0.3 + border_ratio * 0.4;
+        if (score > best_score) {
+            best_score = score;
+            best       = i;
         }
     }
     if (best >= 0) return best;
@@ -143,28 +174,74 @@ bool BboxStrictlyContains(const cv::Rect& outer, const cv::Rect& inner) {
            inner.y + inner.height <= outer.y + outer.height && outer.area() > inner.area();
 }
 
-RoiMask MakeConvexHullMask(const ShapeLayer& layer) {
-    std::vector<cv::Point> pts;
-    cv::findNonZero(layer.mask, pts);
-    if (pts.empty()) return {cv::Mat::zeros(1, 1, CV_8UC1), layer.bbox};
+RoiMask MakeDilatedMask(const ShapeLayer& layer, int img_rows, int img_cols, int radius) {
+    int x0 = std::max(0, layer.bbox.x - radius);
+    int y0 = std::max(0, layer.bbox.y - radius);
+    int x1 = std::min(img_cols, layer.bbox.x + layer.bbox.width + radius);
+    int y1 = std::min(img_rows, layer.bbox.y + layer.bbox.height + radius);
+    cv::Rect expanded(x0, y0, x1 - x0, y1 - y0);
 
-    for (auto& p : pts) {
-        p.x += layer.bbox.x;
-        p.y += layer.bbox.y;
-    }
-    std::vector<cv::Point> hull;
-    cv::convexHull(pts, hull);
-    if (hull.size() < 3) return {layer.mask.clone(), layer.bbox};
+    cv::Mat local = cv::Mat::zeros(expanded.size(), CV_8UC1);
+    cv::Rect src_roi(layer.bbox.x - x0, layer.bbox.y - y0, layer.bbox.width, layer.bbox.height);
+    layer.mask.copyTo(local(src_roi));
 
-    cv::Rect hull_bbox = cv::boundingRect(hull);
-    for (auto& p : hull) {
-        p.x -= hull_bbox.x;
-        p.y -= hull_bbox.y;
-    }
-    cv::Mat hull_mask = cv::Mat::zeros(hull_bbox.size(), CV_8UC1);
-    cv::fillConvexPoly(hull_mask, hull, cv::Scalar(255));
-    return {hull_mask, hull_bbox};
+    cv::Mat kernel =
+        cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(2 * radius + 1, 2 * radius + 1));
+    cv::Mat dilated;
+    cv::dilate(local, dilated, kernel);
+    return {dilated, expanded};
 }
+
+struct TarjanSCC {
+    const std::vector<std::vector<int>>& graph;
+    const std::unordered_set<long long>& removed;
+    const std::unordered_set<int>& active;
+    int N;
+
+    std::vector<int> disc, low;
+    std::vector<bool> on_stack;
+    std::vector<int> stk;
+    std::vector<std::vector<int>> sccs;
+    int timer = 0;
+
+    void Run() {
+        disc.assign(N, -1);
+        low.assign(N, -1);
+        on_stack.assign(N, false);
+        for (int u : active) {
+            if (disc[u] < 0) Dfs(u);
+        }
+    }
+
+    void Dfs(int u) {
+        disc[u] = low[u] = timer++;
+        stk.push_back(u);
+        on_stack[u] = true;
+
+        for (int v : graph[u]) {
+            long long key = static_cast<long long>(u) * N + v;
+            if (!active.count(v) || removed.count(key)) continue;
+            if (disc[v] < 0) {
+                Dfs(v);
+                low[u] = std::min(low[u], low[v]);
+            } else if (on_stack[v]) {
+                low[u] = std::min(low[u], disc[v]);
+            }
+        }
+
+        if (low[u] == disc[u]) {
+            std::vector<int> scc;
+            int w;
+            do {
+                w = stk.back();
+                stk.pop_back();
+                on_stack[w] = false;
+                scc.push_back(w);
+            } while (w != u);
+            if (scc.size() > 1) sccs.push_back(std::move(scc));
+        }
+    }
+};
 
 } // namespace
 
@@ -215,14 +292,18 @@ std::vector<int> ComputeDepthOrder(const std::vector<ShapeLayer>& layers, int im
         return order;
     }
 
-    int bg_idx = FindBackground(layers, img_rows, img_cols);
+    cv::Mat layer_map = BuildLayerMap(layers, img_rows, img_cols);
+    int bg_idx        = FindBackground(layers, img_rows, img_cols, layer_map);
     spdlog::debug("ComputeDepthOrder: N={}, background_idx={}, background_area={:.0f}", N, bg_idx,
                   bg_idx >= 0 ? layers[bg_idx].area : 0.0);
 
-    auto adj = BuildAdjacency(layers, img_rows, img_cols);
+    auto adj = BuildAdjacency(layer_map, img_rows, img_cols);
     spdlog::debug("ComputeDepthOrder: adjacent_pairs={}", adj.size());
 
-    constexpr double kDelta = 0.02;
+    constexpr double kDeltaFloor        = 0.02;
+    const double significance_threshold = static_cast<double>(img_rows) * img_cols * 0.0002;
+    const int dilate_radius             = std::clamp(
+        static_cast<int>(std::sqrt(static_cast<double>(img_rows) * img_cols) * 0.008), 5, 20);
 
     auto DirEdgeKey = [N](int from, int to) -> long long {
         return static_cast<long long>(from) * N + to;
@@ -231,12 +312,23 @@ std::vector<int> ComputeDepthOrder(const std::vector<ShapeLayer>& layers, int im
     std::vector<std::vector<int>> graph(N);
     std::unordered_map<long long, double> edge_v;
 
-    std::unordered_map<int, RoiMask> hull_cache;
-    auto GetHull = [&](int idx) -> const RoiMask& {
-        auto it = hull_cache.find(idx);
-        if (it != hull_cache.end()) return it->second;
-        return hull_cache.emplace(idx, MakeConvexHullMask(layers[idx])).first->second;
+    std::unordered_map<int, RoiMask> dilated_cache;
+    auto GetDilated = [&](int idx) -> const RoiMask& {
+        auto it = dilated_cache.find(idx);
+        if (it != dilated_cache.end()) return it->second;
+        return dilated_cache
+            .emplace(idx, MakeDilatedMask(layers[idx], img_rows, img_cols, dilate_radius))
+            .first->second;
     };
+
+    struct PairD {
+        int i, j;
+        double d_ij, area_i, area_j;
+    };
+
+    std::vector<PairD> pair_data;
+    std::vector<double> all_d_abs;
+    int skipped_small_pairs = 0;
 
     for (auto& [i, j] : adj) {
         if (i == bg_idx || j == bg_idx) {
@@ -245,40 +337,60 @@ std::vector<int> ComputeDepthOrder(const std::vector<ShapeLayer>& layers, int im
             continue;
         }
 
-        const auto& hull_j = GetHull(j);
-        const auto& hull_i = GetHull(i);
-
         double area_i = layers[i].area;
         double area_j = layers[j].area;
         if (area_i < 1.0 || area_j < 1.0) continue;
 
+        if (area_i < significance_threshold && area_j < significance_threshold) {
+            ++skipped_small_pairs;
+            continue;
+        }
+
+        const auto& ext_j = GetDilated(j);
+        const auto& ext_i = GetDilated(i);
+
         double inter_ij =
-            ComputeRoiIntersectionArea(layers[i].bbox, layers[i].mask, hull_j.bbox, hull_j.mask);
+            ComputeRoiIntersectionArea(layers[i].bbox, layers[i].mask, ext_j.bbox, ext_j.mask);
         double inter_ji =
-            ComputeRoiIntersectionArea(layers[j].bbox, layers[j].mask, hull_i.bbox, hull_i.mask);
+            ComputeRoiIntersectionArea(layers[j].bbox, layers[j].mask, ext_i.bbox, ext_i.mask);
         double a_ij = inter_ij / area_i;
         double a_ji = inter_ji / area_j;
         double d_ij = a_ij - a_ji;
 
-        // D(i,j) > 0  →  j below i  (edge j → i)
-        // D(i,j) < 0  →  i below j  (edge i → j)
-        if (d_ij > kDelta) {
-            graph[j].push_back(i);
-            edge_v[DirEdgeKey(j, i)] = std::abs(d_ij);
-        } else if (d_ij < -kDelta) {
-            graph[i].push_back(j);
-            edge_v[DirEdgeKey(i, j)] = std::abs(d_ij);
+        pair_data.push_back({i, j, d_ij, area_i, area_j});
+        if (std::abs(d_ij) > 1e-6) all_d_abs.push_back(std::abs(d_ij));
+    }
+
+    double adaptive_delta = kDeltaFloor;
+    if (all_d_abs.size() > 10) {
+        std::sort(all_d_abs.begin(), all_d_abs.end());
+        adaptive_delta = std::max(kDeltaFloor, all_d_abs[all_d_abs.size() / 4]);
+    }
+
+    for (const auto& p : pair_data) {
+        double confidence = std::abs(p.d_ij) * std::log2(std::max(p.area_i, p.area_j) + 1.0);
+
+        if (p.d_ij > adaptive_delta) {
+            graph[p.j].push_back(p.i);
+            edge_v[DirEdgeKey(p.j, p.i)] = confidence;
+        } else if (p.d_ij < -adaptive_delta) {
+            graph[p.i].push_back(p.j);
+            edge_v[DirEdgeKey(p.i, p.j)] = confidence;
         } else {
             constexpr double kAreaRatioFallback = 3.0;
-            double ratio = std::max(area_i, area_j) / std::min(area_i, area_j);
+            double ratio = std::max(p.area_i, p.area_j) / std::min(p.area_i, p.area_j);
             if (ratio > kAreaRatioFallback) {
-                int big   = (area_i > area_j) ? i : j;
-                int small = (area_i > area_j) ? j : i;
+                int big   = (p.area_i > p.area_j) ? p.i : p.j;
+                int small = (p.area_i > p.area_j) ? p.j : p.i;
                 graph[big].push_back(small);
-                edge_v[DirEdgeKey(big, small)] = kDelta * 0.1;
+                edge_v[DirEdgeKey(big, small)] = kDeltaFloor * 0.1;
             }
         }
     }
+
+    spdlog::debug(
+        "ComputeDepthOrder: skipped_small_pairs={}, dilate_radius={}, adaptive_delta={:.4f}",
+        skipped_small_pairs, dilate_radius, adaptive_delta);
 
     // --- Containment edges for non-adjacent nested shapes ---
     {
@@ -310,7 +422,7 @@ std::vector<int> ComputeDepthOrder(const std::vector<ShapeLayer>& layers, int im
                 if (!BboxStrictlyContains(ob, layers[inner].bbox)) continue;
 
                 graph[outer].push_back(inner);
-                edge_v[DirEdgeKey(outer, inner)] = kDelta * 0.05;
+                edge_v[DirEdgeKey(outer, inner)] = kDeltaFloor * 0.05;
                 existing_edges.insert(DirEdgeKey(outer, inner));
                 ++containment_ct;
             }
@@ -354,44 +466,57 @@ std::vector<int> ComputeDepthOrder(const std::vector<ShapeLayer>& layers, int im
 
     std::vector<int> topo_order = RunKahn();
     int removed_count           = 0;
+    int scc_rounds              = 0;
 
     while (static_cast<int>(topo_order.size()) < N) {
+        ++scc_rounds;
         std::unordered_set<int> placed(topo_order.begin(), topo_order.end());
+        std::unordered_set<int> active;
+        for (int i = 0; i < N; ++i)
+            if (!placed.count(i)) active.insert(i);
 
-        long long weakest_key = -1;
-        double weakest_conf   = std::numeric_limits<double>::max();
+        TarjanSCC tarjan{graph, removed_edges, active, N, {}, {}, {}, {}, {}, 0};
+        tarjan.Run();
 
-        for (int u = 0; u < N; ++u) {
-            if (placed.count(u)) continue;
-            for (int v : graph[u]) {
-                if (placed.count(v)) continue;
-                long long key = DirEdgeKey(u, v);
-                if (removed_edges.count(key)) continue;
+        if (tarjan.sccs.empty()) break;
 
-                double conf = std::numeric_limits<double>::max();
-                auto it     = edge_v.find(key);
-                if (it != edge_v.end()) conf = it->second;
+        int batch = 0;
+        for (const auto& scc : tarjan.sccs) {
+            std::unordered_set<int> scc_set(scc.begin(), scc.end());
+            long long weakest_key = -1;
+            double weakest_conf   = std::numeric_limits<double>::max();
 
-                if (conf < weakest_conf || weakest_key < 0) {
-                    weakest_conf = conf;
-                    weakest_key  = key;
+            for (int u : scc) {
+                for (int v : graph[u]) {
+                    if (!scc_set.count(v)) continue;
+                    long long key = DirEdgeKey(u, v);
+                    if (removed_edges.count(key)) continue;
+                    double conf = std::numeric_limits<double>::max();
+                    auto it     = edge_v.find(key);
+                    if (it != edge_v.end()) conf = it->second;
+                    if (conf < weakest_conf) {
+                        weakest_conf = conf;
+                        weakest_key  = key;
+                    }
                 }
+            }
+
+            if (weakest_key >= 0) {
+                removed_edges.insert(weakest_key);
+                ++batch;
             }
         }
 
-        if (weakest_key < 0) break;
-
-        removed_edges.insert(weakest_key);
-        ++removed_count;
-        spdlog::debug("ComputeDepthOrder: removed edge {}->{} (conf={:.4f}) to break cycle",
-                      static_cast<int>(weakest_key / N), static_cast<int>(weakest_key % N),
-                      weakest_conf);
+        removed_count += batch;
+        spdlog::debug("ComputeDepthOrder: SCC round {}: {} SCCs, removed {} edges", scc_rounds,
+                      tarjan.sccs.size(), batch);
 
         topo_order = RunKahn();
     }
 
     if (removed_count > 0) {
-        spdlog::warn("ComputeDepthOrder: removed {} edge(s) to break cycles", removed_count);
+        spdlog::warn("ComputeDepthOrder: removed {} edge(s) in {} SCC round(s)", removed_count,
+                     scc_rounds);
     }
 
     // Area-based fallback for any remaining unplaced nodes (e.g. isolated nodes).

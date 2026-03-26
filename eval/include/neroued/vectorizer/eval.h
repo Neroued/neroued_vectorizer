@@ -45,6 +45,7 @@ struct PartialVectorizerConfig {
     std::optional<bool> enable_antialias_detect;
     std::optional<float> aa_tolerance;
     std::optional<PipelineMode> pipeline_mode;
+    std::optional<bool> enable_depth_validation;
 
     /// Apply set fields onto \p base, returning the merged config.
     VectorizerConfig MergeInto(const VectorizerConfig& base) const;

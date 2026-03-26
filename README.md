@@ -9,7 +9,7 @@
 ## 特性
 
 - 双管线架构：V1（边界图 + 剪切模型）和 V2（层叠模型 + 深度排序）
-- V2 管线：OKLab MMCQ 感知量化、深度排序画家算法、形状延伸消除缝隙、路径优化、同色合并
+- V2 管线：OKLab MMCQ 感知量化、深度排序画家算法、形状延伸消除缝隙、路径优化、同色合并、覆盖率修补
 - V1 管线：SLIC 超像素 + K-Means、Schneider 曲线拟合、Potrace + Clipper2 拓扑修复
 - 亚像素边界细化
 - 薄线增强、抗锯齿边缘检测
@@ -233,49 +233,52 @@ std::ofstream("output.svg") << result.svg_content;
 
 ### VectorizerConfig 完整参数
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| **管线选择** | | | |
-| `pipeline_mode` | PipelineMode | V1 | 管线实现：V1（经典边界图）或 V2（层叠模型） |
-| **颜色分割** | | | |
-| `num_colors` | int | 0 | 调色板颜色数，0 = 自动检测 |
-| `min_region_area` | int | 50 | 最小区域面积（像素²） |
-| **曲线拟合** | | | |
-| `curve_fit_error` | float | 0.8 | Schneider 曲线拟合误差阈值 |
-| `corner_angle_threshold` | float | 135.0 | 角点检测角度阈值（度） |
-| `smoothness` | float | 0.5 | 轮廓平滑度 [0,1] |
-| **预处理** | | | |
-| `smoothing_spatial` | float | 15.0 | Mean Shift 空间窗口半径 |
-| `smoothing_color` | float | 25.0 | Mean Shift 颜色窗口半径 |
-| `upscale_short_edge` | int | 600 | 短边自动放大阈值（0 = 禁用） |
-| `max_working_pixels` | int | 3000000 | 自动缩小像素阈值（0 = 禁用） |
-| **SLIC 分割** | | | |
-| `slic_region_size` | int | 20 | SLIC 目标区域大小 |
-| `slic_compactness` | float | 6.0 | SLIC 紧致度 |
-| `edge_sensitivity` | float | 0.8 | 边缘感知空间权重衰减 [0,1] |
-| `refine_passes` | int | 6 | 边界标签细化迭代次数 |
-| `max_merge_color_dist` | float | 200.0 | 小区域合并最大 LAB ΔE² |
-| **亚像素边界** | | | |
-| `enable_subpixel_refine` | bool | true | 启用梯度引导亚像素细化 |
-| `subpixel_max_displacement` | float | 0.7 | 亚像素最大法向位移 |
-| **抗锯齿检测** | | | |
-| `enable_antialias_detect` | bool | false | 启用 AA 混合边缘检测 |
-| `aa_tolerance` | float | 10.0 | AA 混合像素最大 LAB ΔE |
-| **薄线增强** | | | |
-| `thin_line_max_radius` | float | 2.5 | 距离变换半径阈值 |
-| **SVG 输出** | | | |
-| `svg_enable_stroke` | bool | true | 启用描边输出 |
-| `svg_stroke_width` | float | 0.5 | 描边宽度 |
-| **细节控制** | | | |
-| `detail_level` | float | -1.0 | 统一细节控制 [0,1]（-1 = 禁用） |
-| `merge_segment_tolerance` | float | 0.05 | 近线性贝塞尔段合并容差 |
-| **Potrace 管线** | | | |
-| `min_contour_area` | float | 10.0 | 最小轮廓面积 |
-| `min_hole_area` | float | 4.0 | 最小孔洞面积 |
-| `contour_simplify` | float | 0.45 | 轮廓简化强度 |
-| `enable_coverage_fix` | bool | true | 启用覆盖率补全 |
-| `min_coverage_ratio` | float | 0.998 | 触发补全的最低覆盖率 |
-| `enable_depth_validation` | bool | false | V2：启用深度排序诊断验证 |
+> **适用范围**：V1+V2 = 两条管线共用，V1 = 仅 V1 边界图管线，V2 = 仅 V2 层叠管线。
+
+| 参数 | 类型 | 默认值 | 适用 | 说明 |
+|------|------|--------|------|------|
+| **管线选择** | | | | |
+| `pipeline_mode` | PipelineMode | V1 | V1+V2 | 管线实现：V1（经典边界图）或 V2（层叠模型） |
+| **颜色分割** | | | | |
+| `num_colors` | int | 0 | V1+V2 | 调色板颜色数，0 = 自动检测 |
+| `min_region_area` | int | 50 | V1+V2 | 最小区域面积（像素²） |
+| **曲线拟合** | | | | |
+| `curve_fit_error` | float | 0.8 | V1+V2 | 曲线拟合误差阈值（V1: Schneider 拟合, V2: 路径合并） |
+| `corner_angle_threshold` | float | 135.0 | V1 | 角点检测角度阈值（度） |
+| `smoothness` | float | 0.5 | V1 | 轮廓平滑度 [0,1] |
+| **预处理** | | | | |
+| `smoothing_spatial` | float | 15.0 | V1+V2 | Mean Shift 空间窗口半径 |
+| `smoothing_color` | float | 25.0 | V1+V2 | Mean Shift 颜色窗口半径 |
+| `upscale_short_edge` | int | 600 | V1+V2 | 短边自动放大阈值（0 = 禁用） |
+| `max_working_pixels` | int | 3000000 | V1+V2 | 自动缩小像素阈值（0 = 禁用） |
+| **SLIC 分割** | | | | |
+| `slic_region_size` | int | 20 | V1 | SLIC 目标区域大小 |
+| `slic_compactness` | float | 6.0 | V1 | SLIC 紧致度 |
+| `edge_sensitivity` | float | 0.8 | V1 | 边缘感知空间权重衰减 [0,1] |
+| `refine_passes` | int | 6 | V1 | 边界标签细化迭代次数 |
+| `max_merge_color_dist` | float | 200.0 | V1+V2 | 小区域合并最大 LAB ΔE² |
+| **亚像素边界** | | | | |
+| `enable_subpixel_refine` | bool | true | V1 | 启用梯度引导亚像素细化 |
+| `subpixel_max_displacement` | float | 0.7 | V1 | 亚像素最大法向位移 |
+| **抗锯齿检测** | | | | |
+| `enable_antialias_detect` | bool | false | V1 | 启用 AA 混合边缘检测 |
+| `aa_tolerance` | float | 10.0 | V1 | AA 混合像素最大 LAB ΔE |
+| **薄线增强** | | | | |
+| `thin_line_max_radius` | float | 2.5 | V1 | 距离变换半径阈值 |
+| **SVG 输出** | | | | |
+| `svg_enable_stroke` | bool | true | V1+V2 | 启用描边输出 |
+| `svg_stroke_width` | float | 0.5 | V1+V2 | 描边宽度 |
+| **细节控制** | | | | |
+| `detail_level` | float | -1.0 | V1 | 统一细节控制 [0,1]（-1 = 禁用） |
+| `merge_segment_tolerance` | float | 0.05 | V1+V2 | 近线性贝塞尔段合并容差 |
+| **Potrace 管线** | | | | |
+| `min_contour_area` | float | 10.0 | V1+V2 | 最小轮廓面积 |
+| `min_hole_area` | float | 4.0 | V1+V2 | 最小孔洞面积 |
+| `contour_simplify` | float | 0.45 | V1+V2 | 轮廓简化强度 |
+| `enable_coverage_fix` | bool | true | V1+V2 | 启用覆盖率修补 |
+| `min_coverage_ratio` | float | 0.998 | V1+V2 | 触发修补的最低覆盖率 |
+| **诊断** | | | | |
+| `enable_depth_validation` | bool | false | V2 | 启用深度排序诊断验证 |
 
 ### VectorizerResult
 

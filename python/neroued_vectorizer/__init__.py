@@ -30,6 +30,7 @@ if sys.platform == "win32":
 from importlib.metadata import PackageNotFoundError, version
 
 from neroued_vectorizer._core import (
+    PipelineMode,
     Rgb,
     VectorizerConfig,
     VectorizerResult,
@@ -43,6 +44,7 @@ except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
 __all__ = [
+    "PipelineMode",
     "Rgb",
     "VectorizerConfig",
     "VectorizerResult",

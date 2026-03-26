@@ -42,6 +42,7 @@ struct Options {
     float aa_tolerance              = 10.0f;
     bool svg_stroke                 = true;
     float svg_stroke_w              = 0.5f;
+    bool enable_depth_validation    = false;
     std::string log_level           = "info";
     std::string pipeline            = "v1";
 };
@@ -79,6 +80,7 @@ void PrintUsage(const char* exe) {
                 "  --aa-tolerance F    AA blend detection LAB tolerance (default 10)\n"
                 "  --no-svg-stroke     Disable SVG stroke output (default on)\n"
                 "  --svg-stroke-w F    SVG stroke width when enabled (default 0.5)\n"
+                "  --enable-depth-validation  V2: enable depth order validation diagnostic\n"
                 "  --log-level LEVEL   Log level: trace/debug/info/warn/error/off (default info)\n"
                 "  --pipeline MODE     Pipeline: v1 (default) or v2 (stacking model)\n",
                 exe);
@@ -299,6 +301,10 @@ bool ParseArgs(int argc, char** argv, Options& opt) {
             opt.svg_stroke = false;
             continue;
         }
+        if (arg == "--enable-depth-validation") {
+            opt.enable_depth_validation = true;
+            continue;
+        }
         if (arg == "--svg-stroke-w" && i + 1 < argc) {
             if (!ParseFloat(argv[++i], opt.svg_stroke_w) || opt.svg_stroke_w < 0.0f) {
                 std::fprintf(stderr, "Invalid --svg-stroke-w\n");
@@ -375,6 +381,7 @@ int main(int argc, char** argv) {
         cfg.aa_tolerance              = opt.aa_tolerance;
         cfg.svg_enable_stroke         = opt.svg_stroke;
         cfg.svg_stroke_width          = opt.svg_stroke_w;
+        cfg.enable_depth_validation   = opt.enable_depth_validation;
         cfg.pipeline_mode = (opt.pipeline == "v2") ? PipelineMode::V2 : PipelineMode::V1;
 
         spdlog::info("Vectorizing {} -> {} [pipeline={}]", opt.image_path, opt.out_path,

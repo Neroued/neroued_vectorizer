@@ -61,6 +61,7 @@ VectorizerConfig PartialVectorizerConfig::MergeInto(const VectorizerConfig& base
     MERGE_FIELD(enable_antialias_detect);
     MERGE_FIELD(aa_tolerance);
     MERGE_FIELD(pipeline_mode);
+    MERGE_FIELD(enable_depth_validation);
 #undef MERGE_FIELD
     return out;
 }

@@ -300,7 +300,8 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
     result.num_shapes          = static_cast<int>(shapes.size());
     result.resolved_num_colors = resolved_colors;
     result.palette             = std::move(palette);
-    result.svg_content         = WriteSvg(shapes, bgr.cols, bgr.rows, false, 0.0f);
+    result.svg_content =
+        WriteSvg(shapes, bgr.cols, bgr.rows, cfg.svg_enable_stroke, cfg.svg_stroke_width);
 
     const auto elapsed_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pipeline_start)

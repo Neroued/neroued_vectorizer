@@ -20,7 +20,7 @@
 
 **V2（层叠模型）**：深度排序 + 画家算法
 ```
-输入图像 → [预处理] → [OKLab MMCQ量化] → [小区域合并] → [连通域提取] → [深度排序] → [形状延伸] → [逐层Potrace] → [路径优化] → [同色合并] → [SVG输出]
+输入图像 → [预处理] → [OKLab MMCQ量化] → [小区域合并] → [连通域提取] → [深度排序] → [形状延伸] → [逐层Potrace] → [路径优化] → [同色合并] → [覆盖率修补] → [SVG输出]
 ```
 
 通过 `VectorizerConfig::pipeline_mode` 选择 `PipelineMode::V1` 或 `PipelineMode::V2`。

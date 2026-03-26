@@ -113,7 +113,7 @@ CubicBezier FitCubicToPoints(const std::vector<Vec2f>& pts) {
 
 bool TryMergeSegments(const CubicBezier& a, const CubicBezier& b, float merge_eps,
                       CubicBezier& result) {
-    constexpr int kSamplesPerSeg = 8;
+    constexpr int kSamplesPerSeg = 12;
     auto sa                      = SampleBezier(a, kSamplesPerSeg);
     auto sb                      = SampleBezier(b, kSamplesPerSeg);
 
@@ -183,20 +183,23 @@ void OptimizeBezierContour(BezierContour& contour, float linear_eps, float merge
     }
 
     // Pass 2: Try to merge adjacent segments by re-fitting.
-    // On successful merge, keep trying to merge the result with the next segment
-    // (chain-merge) to achieve higher compression.
+    // Chain-merge is capped to avoid a single cubic representing too many
+    // original segments, which causes visible dents on smooth arcs.
     if (contour.segments.size() > 2 && merge_eps > 0.f) {
+        constexpr int kMaxChainLength = 3;
         std::vector<CubicBezier> pass2;
         pass2.reserve(contour.segments.size());
         size_t i = 0;
         while (i < contour.segments.size()) {
             CubicBezier current = contour.segments[i];
             ++i;
-            while (i < contour.segments.size()) {
+            int chain_count = 1;
+            while (i < contour.segments.size() && chain_count < kMaxChainLength) {
                 CubicBezier merged;
                 if (TryMergeSegments(current, contour.segments[i], merge_eps, merged)) {
                     current = merged;
                     ++i;
+                    ++chain_count;
                 } else {
                     break;
                 }

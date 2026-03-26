@@ -225,6 +225,20 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
             shape.color = palette[layer.label];
             shape.area  = g.area;
             shape.contours.push_back(std::move(g.outer));
+
+            for (auto& hole : g.holes) {
+                double hole_area = std::abs(BezierContourSignedArea(hole));
+                if (hole_area < static_cast<double>(cfg.min_hole_area)) continue;
+                for (auto& seg : hole.segments) {
+                    seg.p0 = seg.p0 + roi_offset;
+                    seg.p1 = seg.p1 + roi_offset;
+                    seg.p2 = seg.p2 + roi_offset;
+                    seg.p3 = seg.p3 + roi_offset;
+                }
+                hole.is_hole = true;
+                shape.contours.push_back(std::move(hole));
+            }
+
             if (!shape.contours.empty()) { shapes.push_back(std::move(shape)); }
         }
     }
@@ -234,7 +248,7 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
     // ── 9. Path optimization ───────────────────────────────────────────────
     {
         float linear_eps = std::max(0.3f, cfg.merge_segment_tolerance * 5.f);
-        float merge_eps  = std::max(0.5f, cfg.curve_fit_error * 0.6f);
+        float merge_eps  = std::max(0.3f, cfg.curve_fit_error * 0.5f);
         OptimizeShapePaths(shapes, linear_eps, merge_eps);
     }
 

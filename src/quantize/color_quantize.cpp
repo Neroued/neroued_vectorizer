@@ -6,8 +6,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <queue>
 #include <vector>
+
+#ifdef _OPENMP
+#    include <omp.h>
+#endif
 
 namespace neroued::vectorizer::detail {
 
@@ -31,13 +36,17 @@ struct ColorGrid {
     float L_min = 0, a_min = 0, b_min = 0;
     float L_inv = 0, a_inv = 0, b_inv = 0;
 
-    void Build(const cv::Mat& bgr) {
+    void Build(const cv::Mat& bgr, cv::Mat& oklab_cache) {
+        oklab_cache.create(bgr.rows, bgr.cols, CV_32FC3);
+
         float lo_L = 1e9f, lo_a = 1e9f, lo_b = 1e9f;
         float hi_L = -1e9f, hi_a = -1e9f, hi_b = -1e9f;
         for (int r = 0; r < bgr.rows; ++r) {
-            const auto* row = bgr.ptr<cv::Vec3b>(r);
+            const auto* brow = bgr.ptr<cv::Vec3b>(r);
+            auto* orow       = oklab_cache.ptr<cv::Vec3f>(r);
             for (int c = 0; c < bgr.cols; ++c) {
-                auto ok = SrgbToOklab(row[c][2], row[c][1], row[c][0]);
+                auto ok = SrgbToOklab(brow[c][2], brow[c][1], brow[c][0]);
+                orow[c] = cv::Vec3f(ok.L, ok.a, ok.b);
                 lo_L    = std::min(lo_L, ok.L);
                 hi_L    = std::max(hi_L, ok.L);
                 lo_a    = std::min(lo_a, ok.a);
@@ -55,19 +64,47 @@ struct ColorGrid {
         b_inv                = static_cast<float>(kGridDim) / std::max(kEps, hi_b - lo_b);
 
         bins.assign(kGridTotal, HistBin{});
-        for (int r = 0; r < bgr.rows; ++r) {
-            const auto* row = bgr.ptr<cv::Vec3b>(r);
-            for (int c = 0; c < bgr.cols; ++c) {
-                auto ok = SrgbToOklab(row[c][2], row[c][1], row[c][0]);
-                int bi  = BinIndex(ok.L, ok.a, ok.b);
-                auto& h = bins[bi];
-                h.count++;
-                h.sum_l += ok.L;
-                h.sum_a += ok.a;
-                h.sum_b += ok.b;
-                h.sum2_l += static_cast<double>(ok.L) * ok.L;
-                h.sum2_a += static_cast<double>(ok.a) * ok.a;
-                h.sum2_b += static_cast<double>(ok.b) * ok.b;
+#ifdef _OPENMP
+        const int nt = omp_get_max_threads();
+#else
+        const int nt = 1;
+#endif
+        std::vector<std::vector<HistBin>> tl_bins(nt, std::vector<HistBin>(kGridTotal));
+
+#pragma omp parallel
+        {
+#ifdef _OPENMP
+            int tid = omp_get_thread_num();
+#else
+            int tid = 0;
+#endif
+            auto& local = tl_bins[tid];
+#pragma omp for schedule(static)
+            for (int r = 0; r < bgr.rows; ++r) {
+                const auto* orow = oklab_cache.ptr<cv::Vec3f>(r);
+                for (int c = 0; c < bgr.cols; ++c) {
+                    float L = orow[c][0], a = orow[c][1], b = orow[c][2];
+                    int bi  = BinIndex(L, a, b);
+                    auto& h = local[bi];
+                    h.count++;
+                    h.sum_l += L;
+                    h.sum_a += a;
+                    h.sum_b += b;
+                    h.sum2_l += static_cast<double>(L) * L;
+                    h.sum2_a += static_cast<double>(a) * a;
+                    h.sum2_b += static_cast<double>(b) * b;
+                }
+            }
+        }
+        for (int t = 0; t < nt; ++t) {
+            for (int bi = 0; bi < kGridTotal; ++bi) {
+                bins[bi].count += tl_bins[t][bi].count;
+                bins[bi].sum_l += tl_bins[t][bi].sum_l;
+                bins[bi].sum_a += tl_bins[t][bi].sum_a;
+                bins[bi].sum_b += tl_bins[t][bi].sum_b;
+                bins[bi].sum2_l += tl_bins[t][bi].sum2_l;
+                bins[bi].sum2_a += tl_bins[t][bi].sum2_a;
+                bins[bi].sum2_b += tl_bins[t][bi].sum2_b;
             }
         }
     }
@@ -323,8 +360,8 @@ int AutoDetectK(const ColorGrid& grid, const ColorBox& full_box) {
     constexpr int kStallLimit         = 3;
     constexpr double kElbowRatio      = 0.05;
 
-    std::priority_queue<ColorBox, std::vector<ColorBox>, TotalVarGreater> pq;
-    pq.push(full_box);
+    std::vector<ColorBox> pq;
+    pq.push_back(full_box);
 
     double total_variance = BoxTotalVar(full_box);
     if (total_variance < 1e-12) return 2;
@@ -337,11 +374,13 @@ int AutoDetectK(const ColorGrid& grid, const ColorBox& full_box) {
     bool elbow_detected  = false;
 
     while (k < kMaxK && !pq.empty()) {
-        auto top = pq.top();
-        pq.pop();
+        std::pop_heap(pq.begin(), pq.end(), TotalVarGreater{});
+        auto top = std::move(pq.back());
+        pq.pop_back();
 
         if (top.bin_ids.size() < 2) {
-            pq.push(top);
+            pq.push_back(std::move(top));
+            std::push_heap(pq.begin(), pq.end(), TotalVarGreater{});
             break;
         }
 
@@ -349,8 +388,10 @@ int AutoDetectK(const ColorGrid& grid, const ColorBox& full_box) {
         auto [left, right] = MedianCutSplit(top, grid);
         double added_var   = BoxTotalVar(left) + BoxTotalVar(right);
         running_var += added_var - removed_var;
-        pq.push(std::move(left));
-        pq.push(std::move(right));
+        pq.push_back(std::move(left));
+        std::push_heap(pq.begin(), pq.end(), TotalVarGreater{});
+        pq.push_back(std::move(right));
+        std::push_heap(pq.begin(), pq.end(), TotalVarGreater{});
         k++;
 
         double remaining = running_var / total_variance;
@@ -394,27 +435,28 @@ std::vector<OkLabPixel> RunMmcq(const ColorGrid& grid, int num_colors) {
     }
     num_colors = std::max(2, num_colors);
 
-    std::priority_queue<ColorBox> pq;
-    pq.push(std::move(initial));
+    std::vector<ColorBox> heap;
+    heap.push_back(std::move(initial));
 
-    while (static_cast<int>(pq.size()) < num_colors) {
-        auto top = pq.top();
-        pq.pop();
+    while (static_cast<int>(heap.size()) < num_colors) {
+        std::pop_heap(heap.begin(), heap.end());
+        auto top = std::move(heap.back());
+        heap.pop_back();
         if (top.bin_ids.size() < 2) {
-            pq.push(top);
+            heap.push_back(std::move(top));
+            std::push_heap(heap.begin(), heap.end());
             break;
         }
         auto [left, right] = SplitBox(top, grid);
-        pq.push(std::move(left));
-        pq.push(std::move(right));
+        heap.push_back(std::move(left));
+        std::push_heap(heap.begin(), heap.end());
+        heap.push_back(std::move(right));
+        std::push_heap(heap.begin(), heap.end());
     }
 
     std::vector<OkLabPixel> centroids;
-    centroids.reserve(pq.size());
-    while (!pq.empty()) {
-        centroids.push_back(pq.top().mean);
-        pq.pop();
-    }
+    centroids.reserve(heap.size());
+    for (const auto& box : heap) { centroids.push_back(box.mean); }
     spdlog::debug("QuantizeColors: MMCQ produced {} centroids from {} bins", centroids.size(),
                   kGridTotal);
     return centroids;
@@ -427,9 +469,14 @@ void RefineCentroidsKMeans(std::vector<OkLabPixel>& centroids, const ColorGrid& 
     constexpr float kConvergeEps2 = 1e-12f;
     int actual_iters              = 0;
 
+    std::vector<double> sL(K), sA(K), sB(K);
+    std::vector<int> cnt(K);
+
     for (int iter = 0; iter < kRefineIters; ++iter) {
-        std::vector<double> sL(K, 0), sA(K, 0), sB(K, 0);
-        std::vector<int> cnt(K, 0);
+        std::fill(sL.begin(), sL.end(), 0.0);
+        std::fill(sA.begin(), sA.end(), 0.0);
+        std::fill(sB.begin(), sB.end(), 0.0);
+        std::fill(cnt.begin(), cnt.end(), 0);
 
         for (int bi : active_bins) {
             const auto& h = grid.bins[bi];
@@ -480,52 +527,64 @@ void ConsolidatePalette(std::vector<OkLabPixel>& centroids, const ColorGrid& gri
         pixel_count[FindNearestCentroid(mL, ma, mb, centroids)] += h.count;
     }
 
-    std::vector<bool> alive(K, true);
-    bool merged_any = true;
+    struct PairDist {
+        int i, j;
+        float d2;
+    };
+
+    std::vector<PairDist> pairs;
+    pairs.reserve(K * (K - 1) / 2);
+    for (int i = 0; i < K; ++i) {
+        for (int j = i + 1; j < K; ++j) {
+            float dL = centroids[i].L - centroids[j].L;
+            float da = centroids[i].a - centroids[j].a;
+            float db = centroids[i].b - centroids[j].b;
+            float d2 = dL * dL + da * da + db * db;
+            if (d2 < kMergeThreshold2) pairs.push_back({i, j, d2});
+        }
+    }
+    std::sort(pairs.begin(), pairs.end(),
+              [](const PairDist& a, const PairDist& b) { return a.d2 < b.d2; });
+
+    std::vector<int> root(K);
+    std::iota(root.begin(), root.end(), 0);
+    auto find_root = [&](int x) {
+        while (root[x] != x) x = root[x] = root[root[x]];
+        return x;
+    };
+
     int merge_count = 0;
-    while (merged_any) {
-        merged_any       = false;
-        float best_dist2 = kMergeThreshold2;
-        int best_i = -1, best_j = -1;
-        for (int i = 0; i < K; ++i) {
-            if (!alive[i]) continue;
-            for (int j = i + 1; j < K; ++j) {
-                if (!alive[j]) continue;
-                float dL = centroids[i].L - centroids[j].L;
-                float da = centroids[i].a - centroids[j].a;
-                float db = centroids[i].b - centroids[j].b;
-                float d2 = dL * dL + da * da + db * db;
-                if (d2 < best_dist2) {
-                    best_dist2 = d2;
-                    best_i     = i;
-                    best_j     = j;
-                }
-            }
+    for (const auto& p : pairs) {
+        int ri = find_root(p.i);
+        int rj = find_root(p.j);
+        if (ri == rj) continue;
+
+        float cur_dL = centroids[ri].L - centroids[rj].L;
+        float cur_da = centroids[ri].a - centroids[rj].a;
+        float cur_db = centroids[ri].b - centroids[rj].b;
+        if (cur_dL * cur_dL + cur_da * cur_da + cur_db * cur_db >= kMergeThreshold2) continue;
+
+        double w_i     = static_cast<double>(pixel_count[ri]);
+        double w_j     = static_cast<double>(pixel_count[rj]);
+        double w_total = w_i + w_j;
+        if (w_total > 0) {
+            centroids[ri].L =
+                static_cast<float>((w_i * centroids[ri].L + w_j * centroids[rj].L) / w_total);
+            centroids[ri].a =
+                static_cast<float>((w_i * centroids[ri].a + w_j * centroids[rj].a) / w_total);
+            centroids[ri].b =
+                static_cast<float>((w_i * centroids[ri].b + w_j * centroids[rj].b) / w_total);
         }
-        if (best_i >= 0) {
-            double w_i     = static_cast<double>(pixel_count[best_i]);
-            double w_j     = static_cast<double>(pixel_count[best_j]);
-            double w_total = w_i + w_j;
-            if (w_total > 0) {
-                centroids[best_i].L = static_cast<float>(
-                    (w_i * centroids[best_i].L + w_j * centroids[best_j].L) / w_total);
-                centroids[best_i].a = static_cast<float>(
-                    (w_i * centroids[best_i].a + w_j * centroids[best_j].a) / w_total);
-                centroids[best_i].b = static_cast<float>(
-                    (w_i * centroids[best_i].b + w_j * centroids[best_j].b) / w_total);
-            }
-            pixel_count[best_i] += pixel_count[best_j];
-            alive[best_j] = false;
-            merged_any    = true;
-            ++merge_count;
-        }
+        pixel_count[ri] += pixel_count[rj];
+        root[rj] = ri;
+        ++merge_count;
     }
 
     if (merge_count > 0) {
         std::vector<OkLabPixel> compacted;
         compacted.reserve(K - merge_count);
         for (int i = 0; i < K; ++i) {
-            if (alive[i]) compacted.push_back(centroids[i]);
+            if (root[i] == i) compacted.push_back(centroids[i]);
         }
         centroids = std::move(compacted);
         spdlog::info("QuantizeColors: palette consolidation merged {} pairs, K={}", merge_count,
@@ -545,37 +604,42 @@ void SmoothLabels(cv::Mat& labels, const cv::Mat& bgr, const std::vector<OkLabPi
     cv::Mat smoothed = labels.clone();
     int reassigned   = 0;
 
-    for (int r = kRadius; r < rows - kRadius; ++r) {
-        const auto* brow = bgr.ptr<cv::Vec3b>(r);
-        const int* lrow  = labels.ptr<int>(r);
-        int* srow        = smoothed.ptr<int>(r);
-        for (int c = kRadius; c < cols - kRadius; ++c) {
-            int cur_label = lrow[c];
+#pragma omp parallel reduction(+ : reassigned)
+    {
+        std::vector<int> freq(K);
+#pragma omp for schedule(static)
+        for (int r = kRadius; r < rows - kRadius; ++r) {
+            const auto* brow = bgr.ptr<cv::Vec3b>(r);
+            const int* lrow  = labels.ptr<int>(r);
+            int* srow        = smoothed.ptr<int>(r);
+            for (int c = kRadius; c < cols - kRadius; ++c) {
+                int cur_label = lrow[c];
 
-            std::vector<int> freq(K, 0);
-            for (int dr = -kRadius; dr <= kRadius; ++dr) {
-                const int* nr = labels.ptr<int>(r + dr);
-                for (int dc = -kRadius; dc <= kRadius; ++dc) freq[nr[c + dc]]++;
-            }
-
-            int majority    = cur_label;
-            int majority_ct = freq[cur_label];
-            for (int k = 0; k < K; ++k) {
-                if (freq[k] > majority_ct) {
-                    majority_ct = freq[k];
-                    majority    = k;
+                std::fill(freq.begin(), freq.end(), 0);
+                for (int dr = -kRadius; dr <= kRadius; ++dr) {
+                    const int* nr = labels.ptr<int>(r + dr);
+                    for (int dc = -kRadius; dc <= kRadius; ++dc) freq[nr[c + dc]]++;
                 }
-            }
 
-            if (majority == cur_label || majority_ct <= half_window) continue;
+                int majority    = cur_label;
+                int majority_ct = freq[cur_label];
+                for (int k = 0; k < K; ++k) {
+                    if (freq[k] > majority_ct) {
+                        majority_ct = freq[k];
+                        majority    = k;
+                    }
+                }
 
-            auto ok  = SrgbToOklab(brow[c][2], brow[c][1], brow[c][0]);
-            float dL = ok.L - centroids[majority].L;
-            float da = ok.a - centroids[majority].a;
-            float db = ok.b - centroids[majority].b;
-            if (dL * dL + da * da + db * db < kMaxReassignDist2) {
-                srow[c] = majority;
-                ++reassigned;
+                if (majority == cur_label || majority_ct <= half_window) continue;
+
+                auto ok  = SrgbToOklab(brow[c][2], brow[c][1], brow[c][0]);
+                float dL = ok.L - centroids[majority].L;
+                float da = ok.a - centroids[majority].a;
+                float db = ok.b - centroids[majority].b;
+                if (dL * dL + da * da + db * db < kMaxReassignDist2) {
+                    srow[c] = majority;
+                    ++reassigned;
+                }
             }
         }
     }
@@ -587,7 +651,8 @@ void SmoothLabels(cv::Mat& labels, const cv::Mat& bgr, const std::vector<OkLabPi
 
 QuantizeResult QuantizeColors(const cv::Mat& bgr, int num_colors) {
     ColorGrid grid;
-    grid.Build(bgr);
+    cv::Mat oklab_cache;
+    grid.Build(bgr, oklab_cache);
 
     auto centroids = RunMmcq(grid, num_colors);
 
@@ -609,14 +674,15 @@ QuantizeResult QuantizeColors(const cv::Mat& bgr, int num_colors) {
     result.palette.resize(K);
     result.centers_lab.resize(K);
 
+#pragma omp parallel for schedule(static)
     for (int r = 0; r < rows; ++r) {
-        const auto* brow = bgr.ptr<cv::Vec3b>(r);
+        const auto* orow = oklab_cache.ptr<cv::Vec3f>(r);
         auto* lrow       = result.labels.ptr<int>(r);
         for (int c = 0; c < cols; ++c) {
-            auto ok = SrgbToOklab(brow[c][2], brow[c][1], brow[c][0]);
-            lrow[c] = FindNearestCentroid(ok.L, ok.a, ok.b, centroids);
+            lrow[c] = FindNearestCentroid(orow[c][0], orow[c][1], orow[c][2], centroids);
         }
     }
+    oklab_cache.release();
 
     SmoothLabels(result.labels, bgr, centroids);
 

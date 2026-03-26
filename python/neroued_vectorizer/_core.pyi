@@ -131,6 +131,8 @@ class VectorizerConfig:
     """Patch uncovered pixels after vectorization."""
     min_coverage_ratio: float
     """Minimum coverage ratio before patching kicks in."""
+    enable_depth_validation: bool
+    """V2 only: run depth order validation (diagnostic)."""
 
     def __init__(self) -> None:
         """Create a config with default values."""

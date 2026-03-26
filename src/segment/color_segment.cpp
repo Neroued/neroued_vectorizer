@@ -602,15 +602,26 @@ int EstimateOptimalColors(const cv::Mat& bgr) {
 
     auto data = BuildColorSamples(bgr);
 
+    int actual_candidates = kNumCandidates;
+    for (int ci = 0; ci < kNumCandidates; ++ci) {
+        if (kCandidates[ci] > data.n_samples) {
+            actual_candidates = ci;
+            break;
+        }
+    }
+
+    std::vector<float> scores(actual_candidates, std::numeric_limits<float>::max());
+#pragma omp parallel for schedule(dynamic)
+    for (int ci = 0; ci < actual_candidates; ++ci) {
+        scores[ci] = ScoreCandidateK(kCandidates[ci], data);
+    }
+
     int best_k       = 16;
     float best_score = std::numeric_limits<float>::max();
-    for (int ci = 0; ci < kNumCandidates; ++ci) {
-        const int K = kCandidates[ci];
-        if (K > data.n_samples) break;
-        float score = ScoreCandidateK(K, data);
-        if (score < best_score) {
-            best_score = score;
-            best_k     = K;
+    for (int ci = 0; ci < actual_candidates; ++ci) {
+        if (scores[ci] < best_score) {
+            best_score = scores[ci];
+            best_k     = kCandidates[ci];
         }
     }
 

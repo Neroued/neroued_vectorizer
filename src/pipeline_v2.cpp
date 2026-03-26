@@ -21,6 +21,10 @@
 #include <stdexcept>
 #include <vector>
 
+#ifdef _OPENMP
+#    include <omp.h>
+#endif
+
 namespace neroued::vectorizer::detail {
 
 namespace {
@@ -140,25 +144,28 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
     // ── 6. Depth ordering ───────────────────────────────────────────────────
     auto depth_order = ComputeDepthOrder(layers, working_size.height, working_size.width);
 
-    // Build ground-truth label map before extension for validation.
-    cv::Mat gt_labels(working_size, CV_32SC1, cv::Scalar(-1));
-    for (const auto& layer : layers) {
-        const auto& bbox = layer.bbox;
-        const auto& mask = layer.mask;
-        for (int r = 0; r < bbox.height; ++r) {
-            const auto* mrow = mask.ptr<uint8_t>(r);
-            auto* lrow       = gt_labels.ptr<int>(r + bbox.y);
-            for (int c = 0; c < bbox.width; ++c) {
-                if (mrow[c] > 0) lrow[c + bbox.x] = layer.label;
+    // ── 7. Shape extension (dilate into occluded regions) ───────────────────
+    cv::Mat gt_labels;
+    if (cfg.enable_depth_validation) {
+        gt_labels.create(working_size, CV_32SC1);
+        gt_labels.setTo(cv::Scalar(-1));
+        for (const auto& layer : layers) {
+            const auto& bbox = layer.bbox;
+            const auto& mask = layer.mask;
+            for (int r = 0; r < bbox.height; ++r) {
+                const auto* mrow = mask.ptr<uint8_t>(r);
+                auto* lrow       = gt_labels.ptr<int>(r + bbox.y);
+                for (int c = 0; c < bbox.width; ++c) {
+                    if (mrow[c] > 0) lrow[c + bbox.x] = layer.label;
+                }
             }
         }
     }
 
-    // ── 7. Shape extension (dilate into occluded regions) ───────────────────
     ExtendShapeMasks(layers, depth_order, working_size, 3);
 
-    // ── 7b. Depth order validation (diagnostic) ─────────────────────────────
-    {
+    // ── 7b. Depth order validation (diagnostic, opt-in) ─────────────────────
+    if (cfg.enable_depth_validation) {
         cv::Mat rendered(working_size, CV_32SC1, cv::Scalar(-1));
         for (int idx : depth_order) {
             const auto& layer = layers[idx];
@@ -174,10 +181,13 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
         }
 
         int total_opaque = 0, mismatch = 0;
-        for (int r = 0; r < working_size.height; ++r) {
+        const int val_rows = working_size.height;
+        const int val_cols = working_size.width;
+#pragma omp parallel for reduction(+ : total_opaque, mismatch) schedule(static)
+        for (int r = 0; r < val_rows; ++r) {
             const int* gt_row = gt_labels.ptr<int>(r);
             const int* rd_row = rendered.ptr<int>(r);
-            for (int c = 0; c < working_size.width; ++c) {
+            for (int c = 0; c < val_cols; ++c) {
                 if (gt_row[c] < 0) continue;
                 ++total_opaque;
                 if (rd_row[c] != gt_row[c]) ++mismatch;
@@ -192,8 +202,8 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
             spdlog::debug("V2 depth order validation: mismatch_rate={:.4f} ({}/{} opaque pixels)",
                           mismatch_rate, mismatch, total_opaque);
         }
+        gt_labels.release();
     }
-    gt_labels.release();
 
     // ── 8. Per-layer Potrace tracing ────────────────────────────────────────
     auto tp                   = DeriveTraceParams(cfg.contour_simplify);
@@ -201,10 +211,12 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
     const int turdsize        = tp.turdsize;
     const double opttolerance = tp.opttolerance;
 
-    std::vector<VectorizedShape> shapes;
-    shapes.reserve(layers.size());
+    const int depth_count = static_cast<int>(depth_order.size());
+    std::vector<std::vector<VectorizedShape>> per_rank_shapes(depth_count);
 
-    for (int idx : depth_order) {
+#pragma omp parallel for schedule(dynamic)
+    for (int rank = 0; rank < depth_count; ++rank) {
+        int idx           = depth_order[rank];
         const auto& layer = layers[idx];
         if (layer.area < cfg.min_contour_area) continue;
 
@@ -239,8 +251,14 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
                 shape.contours.push_back(std::move(hole));
             }
 
-            if (!shape.contours.empty()) { shapes.push_back(std::move(shape)); }
+            if (!shape.contours.empty()) { per_rank_shapes[rank].push_back(std::move(shape)); }
         }
+    }
+
+    std::vector<VectorizedShape> shapes;
+    shapes.reserve(layers.size());
+    for (int rank = 0; rank < depth_count; ++rank) {
+        for (auto& s : per_rank_shapes[rank]) shapes.push_back(std::move(s));
     }
 
     spdlog::info("V2 tracing done: {} shapes", shapes.size());

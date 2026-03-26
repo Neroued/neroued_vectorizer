@@ -207,8 +207,11 @@ void OptimizeBezierContour(BezierContour& contour, float linear_eps, float merge
 
 void OptimizeShapePaths(std::vector<VectorizedShape>& shapes, float linear_eps, float merge_eps) {
     int total_before = 0, total_after = 0;
-    for (auto& shape : shapes) {
-        for (auto& contour : shape.contours) {
+    const int n = static_cast<int>(shapes.size());
+
+#pragma omp parallel for schedule(dynamic) reduction(+ : total_before, total_after)
+    for (int i = 0; i < n; ++i) {
+        for (auto& contour : shapes[i].contours) {
             total_before += static_cast<int>(contour.segments.size());
             OptimizeBezierContour(contour, linear_eps, merge_eps);
             total_after += static_cast<int>(contour.segments.size());

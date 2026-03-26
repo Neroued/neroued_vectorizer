@@ -22,6 +22,21 @@ struct OkLab {
 
 namespace oklab_internal {
 
+inline const float* GetSrgbToLinearLUT() {
+    static float lut[256] = {};
+    static bool ready     = false;
+    if (!ready) {
+        for (int i = 0; i < 256; ++i) {
+            float s = static_cast<float>(i) / 255.f;
+            lut[i]  = (s <= 0.04045f) ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
+        }
+        ready = true;
+    }
+    return lut;
+}
+
+inline float SrgbToLinearFast(uint8_t v) { return GetSrgbToLinearLUT()[v]; }
+
 inline float SrgbToLinear(float c) {
     return (c <= 0.04045f) ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
 }
@@ -49,9 +64,9 @@ inline OkLab LinearRgbToOklab(float r, float g, float b) {
 } // namespace oklab_internal
 
 inline OkLab SrgbToOklab(uint8_t r8, uint8_t g8, uint8_t b8) {
-    return oklab_internal::LinearRgbToOklab(oklab_internal::SrgbToLinear(r8 / 255.f),
-                                            oklab_internal::SrgbToLinear(g8 / 255.f),
-                                            oklab_internal::SrgbToLinear(b8 / 255.f));
+    return oklab_internal::LinearRgbToOklab(oklab_internal::SrgbToLinearFast(r8),
+                                            oklab_internal::SrgbToLinearFast(g8),
+                                            oklab_internal::SrgbToLinearFast(b8));
 }
 
 inline OkLab SrgbToOklab(float r01, float g01, float b01) {

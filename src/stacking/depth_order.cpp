@@ -515,36 +515,93 @@ std::vector<int> TopologicalSortWithCycleBreaking(const DepthGraph& dg,
 } // namespace
 
 std::vector<ShapeLayer> ExtractShapeLayers(const cv::Mat& labels, int num_labels, double min_area) {
+    const int rows = labels.rows;
+    const int cols = labels.cols;
+
+    cv::Mat cc_labels(rows, cols, CV_32SC1, cv::Scalar(0));
+    int next_cc = 1;
+
+    struct CCInfo {
+        int label;
+        int min_r, min_c, max_r, max_c;
+        int area;
+    };
+
+    std::vector<CCInfo> cc_infos;
+    cc_infos.reserve(256);
+
+    std::vector<std::pair<int, int>> stack;
+    stack.reserve(std::max(rows, cols) * 4);
+
+    for (int r = 0; r < rows; ++r) {
+        const int* lrow  = labels.ptr<int>(r);
+        const int* ccrow = cc_labels.ptr<int>(r);
+        for (int c = 0; c < cols; ++c) {
+            if (lrow[c] < 0 || ccrow[c] != 0) continue;
+
+            int lid   = lrow[c];
+            int cc_id = next_cc++;
+            CCInfo info{lid, r, c, r, c, 0};
+
+            stack.clear();
+            stack.push_back({r, c});
+            cc_labels.at<int>(r, c) = cc_id;
+
+            while (!stack.empty()) {
+                auto [cr, cc_] = stack.back();
+                stack.pop_back();
+                info.area++;
+                info.min_r = std::min(info.min_r, cr);
+                info.max_r = std::max(info.max_r, cr);
+                info.min_c = std::min(info.min_c, cc_);
+                info.max_c = std::max(info.max_c, cc_);
+
+                constexpr int dr[] = {-1, 1, 0, 0};
+                constexpr int dc[] = {0, 0, -1, 1};
+                for (int d = 0; d < 4; ++d) {
+                    int nr = cr + dr[d], nc = cc_ + dc[d];
+                    if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+                    if (cc_labels.at<int>(nr, nc) != 0) continue;
+                    if (labels.at<int>(nr, nc) != lid) continue;
+                    cc_labels.at<int>(nr, nc) = cc_id;
+                    stack.push_back({nr, nc});
+                }
+            }
+
+            cc_infos.push_back(info);
+        }
+    }
+
     std::vector<ShapeLayer> layers;
     int skipped = 0;
 
-    for (int lid = 0; lid < num_labels; ++lid) {
-        cv::Mat label_mask = (labels == lid);
-        label_mask.convertTo(label_mask, CV_8UC1, 255);
-        if (cv::countNonZero(label_mask) == 0) continue;
-
-        cv::Mat cc_labels;
-        int num_cc = cv::connectedComponents(label_mask, cc_labels, 4, CV_32S);
-
-        for (int cc = 1; cc < num_cc; ++cc) {
-            cv::Mat cc_mask = (cc_labels == cc);
-            cc_mask.convertTo(cc_mask, CV_8UC1, 255);
-            double area = cv::countNonZero(cc_mask);
-            if (area < min_area) {
-                ++skipped;
-                continue;
-            }
-
-            cv::Rect bbox = cv::boundingRect(cc_mask);
-
-            ShapeLayer layer;
-            layer.label = lid;
-            layer.cc_id = cc;
-            layer.bbox  = bbox;
-            layer.mask  = cc_mask(bbox).clone();
-            layer.area  = area;
-            layers.push_back(std::move(layer));
+    for (int i = 0; i < static_cast<int>(cc_infos.size()); ++i) {
+        const auto& info = cc_infos[i];
+        if (info.area < min_area) {
+            ++skipped;
+            continue;
         }
+
+        int cc_id = i + 1;
+        cv::Rect bbox(info.min_c, info.min_r, info.max_c - info.min_c + 1,
+                      info.max_r - info.min_r + 1);
+        cv::Mat mask(bbox.height, bbox.width, CV_8UC1, cv::Scalar(0));
+
+        for (int r = bbox.y; r < bbox.y + bbox.height; ++r) {
+            const int* ccrow = cc_labels.ptr<int>(r);
+            auto* mrow       = mask.ptr<uint8_t>(r - bbox.y);
+            for (int c = bbox.x; c < bbox.x + bbox.width; ++c) {
+                if (ccrow[c] == cc_id) mrow[c - bbox.x] = 255;
+            }
+        }
+
+        ShapeLayer layer;
+        layer.label = info.label;
+        layer.cc_id = cc_id;
+        layer.bbox  = bbox;
+        layer.mask  = std::move(mask);
+        layer.area  = info.area;
+        layers.push_back(std::move(layer));
     }
 
     spdlog::info("ExtractShapeLayers: num_labels={}, shape_layers={}, skipped_small={}", num_labels,

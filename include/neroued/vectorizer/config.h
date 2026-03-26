@@ -73,6 +73,9 @@ struct VectorizerConfig {
     float contour_simplify   = 0.45f;  ///< Contour simplification strength (larger => fewer nodes).
     bool enable_coverage_fix = true;   ///< Patch uncovered pixels after vectorization.
     float min_coverage_ratio = 0.998f; ///< Minimum coverage ratio before patching.
+
+    // ── Diagnostics ──────────────────────────────────────────────────────────
+    bool enable_depth_validation = false; ///< V2 only: run depth order validation (diagnostic).
 };
 
 } // namespace neroued::vectorizer

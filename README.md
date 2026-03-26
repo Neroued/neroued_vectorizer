@@ -275,6 +275,7 @@ std::ofstream("output.svg") << result.svg_content;
 | `contour_simplify` | float | 0.45 | 轮廓简化强度 |
 | `enable_coverage_fix` | bool | true | 启用覆盖率补全 |
 | `min_coverage_ratio` | float | 0.998 | 触发补全的最低覆盖率 |
+| `enable_depth_validation` | bool | false | V2：启用深度排序诊断验证 |
 
 ### VectorizerResult
 

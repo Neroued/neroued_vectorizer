@@ -189,6 +189,8 @@ PYBIND11_MODULE(_core, m) {
                       "Patch uncovered pixels after vectorization.");
     cfg.def_readwrite("min_coverage_ratio", &VectorizerConfig::min_coverage_ratio,
                       "Minimum coverage ratio before patching kicks in.");
+    cfg.def_readwrite("enable_depth_validation", &VectorizerConfig::enable_depth_validation,
+                      "V2 only: run depth order validation (diagnostic).");
 
     cfg.def("__repr__", [](const VectorizerConfig& c) {
         std::ostringstream os;

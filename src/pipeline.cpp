@@ -25,6 +25,10 @@
 #include <stdexcept>
 #include <vector>
 
+#ifdef _OPENMP
+#    include <omp.h>
+#endif
+
 namespace neroued::vectorizer::detail {
 
 VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
@@ -135,6 +139,28 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
     spdlog::info("V1: labels compacted: num_labels={}, palette_size={}", num_labels,
                  palette.size());
 
+    struct LabelMask {
+        cv::Mat mask;
+        int pixel_count = 0;
+    };
+
+    std::vector<LabelMask> label_masks(num_labels);
+    {
+        for (int rid = 0; rid < num_labels; ++rid) {
+            label_masks[rid].mask = cv::Mat::zeros(seg.labels.size(), CV_8UC1);
+        }
+        for (int r = 0; r < seg.labels.rows; ++r) {
+            const int* lrow = seg.labels.ptr<int>(r);
+            for (int c = 0; c < seg.labels.cols; ++c) {
+                int lid = lrow[c];
+                if (lid >= 0 && lid < num_labels) {
+                    label_masks[lid].mask.at<uint8_t>(r, c) = 255;
+                    label_masks[lid].pixel_count++;
+                }
+            }
+        }
+    }
+
     float effective_curve_fit_error  = cfg.curve_fit_error;
     float effective_contour_simplify = cfg.contour_simplify;
     if (cfg.detail_level >= 0.0f) {
@@ -233,9 +259,8 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
         for (int rid = 0; rid < num_labels; ++rid) {
             if (label_covered[rid]) continue;
             ++fallback_labels;
-            cv::Mat mask = (seg.labels == rid);
-            mask.convertTo(mask, CV_8UC1, 255);
-            if (cv::countNonZero(mask) <= 0) continue;
+            const cv::Mat& mask = label_masks[rid].mask;
+            if (label_masks[rid].pixel_count <= 0) continue;
 
             auto traced = TraceMaskWithPotraceBezier(mask, turdsize, opttolerance);
             for (auto& g : traced) {
@@ -265,10 +290,12 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
         int labels_traced       = 0;
         int dilate_retry_count  = 0;
         int direct_shapes_added = 0;
+        std::vector<std::vector<VectorizedShape>> per_label_shapes(num_labels);
+
+#pragma omp parallel for schedule(dynamic) reduction(+ : labels_traced, dilate_retry_count)
         for (int rid = 0; rid < num_labels; ++rid) {
-            cv::Mat mask = (seg.labels == rid);
-            mask.convertTo(mask, CV_8UC1, 255);
-            int px = cv::countNonZero(mask);
+            const cv::Mat& mask = label_masks[rid].mask;
+            int px              = label_masks[rid].pixel_count;
             if (px <= 0) continue;
             ++labels_traced;
 
@@ -294,10 +321,13 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
                     hole.is_hole = true;
                     shape.contours.push_back(std::move(hole));
                 }
-                if (!shape.contours.empty()) {
-                    shapes.push_back(std::move(shape));
-                    ++direct_shapes_added;
-                }
+                if (!shape.contours.empty()) { per_label_shapes[rid].push_back(std::move(shape)); }
+            }
+        }
+        for (int rid = 0; rid < num_labels; ++rid) {
+            for (auto& s : per_label_shapes[rid]) {
+                shapes.push_back(std::move(s));
+                ++direct_shapes_added;
             }
         }
         if (dilate_retry_count > 0) {
@@ -319,9 +349,8 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
         int labels_with_thin = 0;
         int stroke_added     = 0;
         for (int rid = 0; rid < num_labels && stroke_added < max_stroke_count; ++rid) {
-            cv::Mat mask = (seg.labels == rid);
-            mask.convertTo(mask, CV_8UC1, 255);
-            if (cv::countNonZero(mask) <= 0) continue;
+            const cv::Mat& mask = label_masks[rid].mask;
+            if (label_masks[rid].pixel_count <= 0) continue;
 
             cv::Mat thin = DetectThinRegion(mask, adaptive_thin_radius);
             if (cv::countNonZero(thin) < 3) continue;

@@ -89,6 +89,17 @@ inline cv::Mat ExtractOpaqueMask(const cv::Mat& src, uint8_t alpha_threshold = 0
     return mask;
 }
 
+/// Squared Euclidean distance between two CIE L*a*b* colors (cv::Vec3f).
+inline float LabDistSq(const cv::Vec3f& a, const cv::Vec3f& b) {
+    float dL = a[0] - b[0];
+    float da = a[1] - b[1];
+    float db = a[2] - b[2];
+    return dL * dL + da * da + db * db;
+}
+
+/// Euclidean distance between two CIE L*a*b* colors (cv::Vec3f).
+inline float LabDist(const cv::Vec3f& a, const cv::Vec3f& b) { return std::sqrt(LabDistSq(a, b)); }
+
 /// Convert a BGR (uint8) image to CIE L*a*b* (float32).
 /// Returns an empty Mat if input is empty.
 inline cv::Mat BgrToLab(const cv::Mat& bgr) {

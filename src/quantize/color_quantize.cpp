@@ -1,5 +1,5 @@
-#include "quantize/color_quantize.h"
-#include "quantize/oklab.h"
+#include "color_quantize.h"
+#include "oklab.h"
 
 #include <opencv2/imgproc.hpp>
 #include <spdlog/spdlog.h>
@@ -17,13 +17,13 @@ constexpr int kGridDim   = 32;
 constexpr int kGridTotal = kGridDim * kGridDim * kGridDim;
 
 struct HistBin {
-    int count    = 0;
-    double sumL  = 0;
-    double sumA  = 0;
-    double sumB  = 0;
-    double sum2L = 0;
-    double sum2A = 0;
-    double sum2B = 0;
+    int count     = 0;
+    double sum_l  = 0;
+    double sum_a  = 0;
+    double sum_b  = 0;
+    double sum2_l = 0;
+    double sum2_a = 0;
+    double sum2_b = 0;
 };
 
 struct ColorGrid {
@@ -62,12 +62,12 @@ struct ColorGrid {
                 int bi  = BinIndex(ok.L, ok.a, ok.b);
                 auto& h = bins[bi];
                 h.count++;
-                h.sumL += ok.L;
-                h.sumA += ok.a;
-                h.sumB += ok.b;
-                h.sum2L += static_cast<double>(ok.L) * ok.L;
-                h.sum2A += static_cast<double>(ok.a) * ok.a;
-                h.sum2B += static_cast<double>(ok.b) * ok.b;
+                h.sum_l += ok.L;
+                h.sum_a += ok.a;
+                h.sum_b += ok.b;
+                h.sum2_l += static_cast<double>(ok.L) * ok.L;
+                h.sum2_a += static_cast<double>(ok.a) * ok.a;
+                h.sum2_b += static_cast<double>(ok.b) * ok.b;
             }
         }
     }
@@ -85,11 +85,11 @@ struct ColorGrid {
         double inv = 1.0 / h.count;
         switch (axis) {
         case 0:
-            return static_cast<float>(h.sumL * inv);
+            return static_cast<float>(h.sum_l * inv);
         case 1:
-            return static_cast<float>(h.sumA * inv);
+            return static_cast<float>(h.sum_a * inv);
         default:
-            return static_cast<float>(h.sumB * inv);
+            return static_cast<float>(h.sum_b * inv);
         }
     }
 };
@@ -122,16 +122,16 @@ void ComputeBoxStats(ColorBox& box, const ColorGrid& grid) {
         const auto& h = grid.bins[bi];
         if (h.count == 0) continue;
         box.total_count += h.count;
-        tL += h.sumL;
-        tA += h.sumA;
-        tB += h.sumB;
-        t2L += h.sum2L;
-        t2A += h.sum2A;
-        t2B += h.sum2B;
+        tL += h.sum_l;
+        tA += h.sum_a;
+        tB += h.sum_b;
+        t2L += h.sum2_l;
+        t2A += h.sum2_a;
+        t2B += h.sum2_b;
 
-        float mL         = static_cast<float>(h.sumL / h.count);
-        float ma         = static_cast<float>(h.sumA / h.count);
-        float mb         = static_cast<float>(h.sumB / h.count);
+        float mL         = static_cast<float>(h.sum_l / h.count);
+        float ma         = static_cast<float>(h.sum_a / h.count);
+        float mb         = static_cast<float>(h.sum_b / h.count);
         box.min_corner.L = std::min(box.min_corner.L, mL);
         box.min_corner.a = std::min(box.min_corner.a, ma);
         box.min_corner.b = std::min(box.min_corner.b, mb);
@@ -185,7 +185,6 @@ std::pair<ColorBox, ColorBox> MedianCutSplit(ColorBox& box, const ColorGrid& gri
             break;
         }
     }
-    if (median_idx == 0 && sorted.size() > 1) median_idx = 0;
     if (median_idx >= sorted.size() - 1 && sorted.size() > 1) median_idx = sorted.size() - 2;
 
     ColorBox left, right;
@@ -215,9 +214,9 @@ std::pair<ColorBox, ColorBox> SplitBox(ColorBox& box, const ColorGrid& grid) {
     for (int bi : box.bin_ids) {
         const auto& h = grid.bins[bi];
         if (h.count == 0) continue;
-        float mL = static_cast<float>(h.sumL / h.count);
-        float ma = static_cast<float>(h.sumA / h.count);
-        float mb = static_cast<float>(h.sumB / h.count);
+        float mL = static_cast<float>(h.sum_l / h.count);
+        float ma = static_cast<float>(h.sum_a / h.count);
+        float mb = static_cast<float>(h.sum_b / h.count);
         float dL = mL - seed_a.L, da = ma - seed_a.a, db = mb - seed_a.b;
         float d2 = dL * dL + da * da + db * db;
         if (d2 > max_d2) {
@@ -239,9 +238,9 @@ std::pair<ColorBox, ColorBox> SplitBox(ColorBox& box, const ColorGrid& grid) {
         for (size_t idx = 0; idx < box.bin_ids.size(); ++idx) {
             const auto& h = grid.bins[box.bin_ids[idx]];
             if (h.count == 0) continue;
-            float mL = static_cast<float>(h.sumL / h.count);
-            float ma = static_cast<float>(h.sumA / h.count);
-            float mb = static_cast<float>(h.sumB / h.count);
+            float mL = static_cast<float>(h.sum_l / h.count);
+            float ma = static_cast<float>(h.sum_a / h.count);
+            float mb = static_cast<float>(h.sum_b / h.count);
 
             float daL = mL - seed_a.L, daa = ma - seed_a.a, dab = mb - seed_a.b;
             float dbL = mL - seed_b.L, dba = ma - seed_b.a, dbb = mb - seed_b.b;
@@ -250,15 +249,15 @@ std::pair<ColorBox, ColorBox> SplitBox(ColorBox& box, const ColorGrid& grid) {
 
             if (da2 <= db2) {
                 assign[idx] = 0;
-                sL_a += h.sumL;
-                sA_a += h.sumA;
-                sB_a += h.sumB;
+                sL_a += h.sum_l;
+                sA_a += h.sum_a;
+                sB_a += h.sum_b;
                 cnt_a += h.count;
             } else {
                 assign[idx] = 1;
-                sL_b += h.sumL;
-                sA_b += h.sumA;
-                sB_b += h.sumB;
+                sL_b += h.sum_l;
+                sA_b += h.sum_a;
+                sB_b += h.sum_b;
                 cnt_b += h.count;
             }
         }
@@ -292,6 +291,22 @@ std::pair<ColorBox, ColorBox> SplitBox(ColorBox& box, const ColorGrid& grid) {
 }
 
 double BoxTotalVar(const ColorBox& b) { return b.var_L + b.var_a + b.var_b; }
+
+int FindNearestCentroid(float L, float a, float b, const std::vector<OkLabPixel>& centroids) {
+    float best_d = 1e30f;
+    int best_j   = 0;
+    for (int j = 0; j < static_cast<int>(centroids.size()); ++j) {
+        float dL = L - centroids[j].L;
+        float da = a - centroids[j].a;
+        float db = b - centroids[j].b;
+        float d  = dL * dL + da * da + db * db;
+        if (d < best_d) {
+            best_d = d;
+            best_j = j;
+        }
+    }
+    return best_j;
+}
 
 struct TotalVarGreater {
     bool operator()(const ColorBox& a, const ColorBox& b) const {
@@ -366,16 +381,7 @@ int AutoDetectK(const ColorGrid& grid, const ColorBox& full_box) {
     return std::clamp(final_k, 2, kMaxK);
 }
 
-} // namespace
-
-QuantizeResult QuantizeColors(const cv::Mat& bgr, int num_colors) {
-    const int rows  = bgr.rows;
-    const int cols  = bgr.cols;
-    const int total = rows * cols;
-
-    ColorGrid grid;
-    grid.Build(bgr);
-
+std::vector<OkLabPixel> RunMmcq(const ColorGrid& grid, int num_colors) {
     ColorBox initial;
     for (int i = 0; i < kGridTotal; ++i) {
         if (grid.bins[i].count > 0) initial.bin_ids.push_back(i);
@@ -394,65 +400,47 @@ QuantizeResult QuantizeColors(const cv::Mat& bgr, int num_colors) {
     while (static_cast<int>(pq.size()) < num_colors) {
         auto top = pq.top();
         pq.pop();
-
         if (top.bin_ids.size() < 2) {
             pq.push(top);
             break;
         }
-
         auto [left, right] = SplitBox(top, grid);
         pq.push(std::move(left));
         pq.push(std::move(right));
     }
 
-    std::vector<ColorBox> boxes;
-    boxes.reserve(pq.size());
+    std::vector<OkLabPixel> centroids;
+    centroids.reserve(pq.size());
     while (!pq.empty()) {
-        boxes.push_back(pq.top());
+        centroids.push_back(pq.top().mean);
         pq.pop();
     }
+    spdlog::debug("QuantizeColors: MMCQ produced {} centroids from {} bins", centroids.size(),
+                  kGridTotal);
+    return centroids;
+}
 
-    int K = static_cast<int>(boxes.size());
-    spdlog::debug("QuantizeColors: MMCQ produced {} boxes from {} bins", K, kGridTotal);
-
-    std::vector<OkLabPixel> centroids(K);
-    for (int i = 0; i < K; ++i) { centroids[i] = boxes[i].mean; }
-    boxes.clear();
-
-    std::vector<int> active_bins;
-    active_bins.reserve(kGridTotal);
-    for (int i = 0; i < kGridTotal; ++i) {
-        if (grid.bins[i].count > 0) active_bins.push_back(i);
-    }
-
+void RefineCentroidsKMeans(std::vector<OkLabPixel>& centroids, const ColorGrid& grid,
+                           const std::vector<int>& active_bins) {
+    const int K                   = static_cast<int>(centroids.size());
     constexpr int kRefineIters    = 8;
     constexpr float kConvergeEps2 = 1e-12f;
     int actual_iters              = 0;
+
     for (int iter = 0; iter < kRefineIters; ++iter) {
         std::vector<double> sL(K, 0), sA(K, 0), sB(K, 0);
         std::vector<int> cnt(K, 0);
 
         for (int bi : active_bins) {
             const auto& h = grid.bins[bi];
-            float mL      = static_cast<float>(h.sumL / h.count);
-            float ma      = static_cast<float>(h.sumA / h.count);
-            float mb      = static_cast<float>(h.sumB / h.count);
+            float mL      = static_cast<float>(h.sum_l / h.count);
+            float ma      = static_cast<float>(h.sum_a / h.count);
+            float mb      = static_cast<float>(h.sum_b / h.count);
 
-            float best_d = 1e30f;
-            int best_j   = 0;
-            for (int j = 0; j < K; ++j) {
-                float dL = mL - centroids[j].L;
-                float da = ma - centroids[j].a;
-                float db = mb - centroids[j].b;
-                float d  = dL * dL + da * da + db * db;
-                if (d < best_d) {
-                    best_d = d;
-                    best_j = j;
-                }
-            }
-            sL[best_j] += h.sumL;
-            sA[best_j] += h.sumA;
-            sB[best_j] += h.sumB;
+            int best_j = FindNearestCentroid(mL, ma, mb, centroids);
+            sL[best_j] += h.sum_l;
+            sA[best_j] += h.sum_a;
+            sB[best_j] += h.sum_b;
             cnt[best_j] += h.count;
         }
 
@@ -476,85 +464,145 @@ QuantizeResult QuantizeColors(const cv::Mat& bgr, int num_colors) {
     }
     spdlog::debug("QuantizeColors: K-Means refinement done ({}/{} iters on {} bins)", actual_iters,
                   kRefineIters, active_bins.size());
+}
 
-    // ── Palette consolidation: merge perceptually near-identical centroids ────
-    {
-        constexpr float kMergeThreshold2 = 0.025f * 0.025f;
+void ConsolidatePalette(std::vector<OkLabPixel>& centroids, const ColorGrid& grid,
+                        const std::vector<int>& active_bins) {
+    constexpr float kMergeThreshold2 = 0.025f * 0.025f;
+    int K                            = static_cast<int>(centroids.size());
 
-        std::vector<int> pixel_count(K, 0);
-        for (int bi : active_bins) {
-            const auto& h = grid.bins[bi];
-            float mL      = static_cast<float>(h.sumL / h.count);
-            float ma      = static_cast<float>(h.sumA / h.count);
-            float mb      = static_cast<float>(h.sumB / h.count);
-            float best_d  = 1e30f;
-            int best_j    = 0;
-            for (int j = 0; j < K; ++j) {
-                float dL = mL - centroids[j].L;
-                float da = ma - centroids[j].a;
-                float db = mb - centroids[j].b;
-                float d  = dL * dL + da * da + db * db;
-                if (d < best_d) {
-                    best_d = d;
-                    best_j = j;
-                }
-            }
-            pixel_count[best_j] += h.count;
-        }
+    std::vector<int> pixel_count(K, 0);
+    for (int bi : active_bins) {
+        const auto& h = grid.bins[bi];
+        float mL      = static_cast<float>(h.sum_l / h.count);
+        float ma      = static_cast<float>(h.sum_a / h.count);
+        float mb      = static_cast<float>(h.sum_b / h.count);
+        pixel_count[FindNearestCentroid(mL, ma, mb, centroids)] += h.count;
+    }
 
-        std::vector<bool> alive(K, true);
-        bool merged_any = true;
-        int merge_count = 0;
-        while (merged_any) {
-            merged_any       = false;
-            float best_dist2 = kMergeThreshold2;
-            int best_i = -1, best_j = -1;
-            for (int i = 0; i < K; ++i) {
-                if (!alive[i]) continue;
-                for (int j = i + 1; j < K; ++j) {
-                    if (!alive[j]) continue;
-                    float dL = centroids[i].L - centroids[j].L;
-                    float da = centroids[i].a - centroids[j].a;
-                    float db = centroids[i].b - centroids[j].b;
-                    float d2 = dL * dL + da * da + db * db;
-                    if (d2 < best_dist2) {
-                        best_dist2 = d2;
-                        best_i     = i;
-                        best_j     = j;
-                    }
+    std::vector<bool> alive(K, true);
+    bool merged_any = true;
+    int merge_count = 0;
+    while (merged_any) {
+        merged_any       = false;
+        float best_dist2 = kMergeThreshold2;
+        int best_i = -1, best_j = -1;
+        for (int i = 0; i < K; ++i) {
+            if (!alive[i]) continue;
+            for (int j = i + 1; j < K; ++j) {
+                if (!alive[j]) continue;
+                float dL = centroids[i].L - centroids[j].L;
+                float da = centroids[i].a - centroids[j].a;
+                float db = centroids[i].b - centroids[j].b;
+                float d2 = dL * dL + da * da + db * db;
+                if (d2 < best_dist2) {
+                    best_dist2 = d2;
+                    best_i     = i;
+                    best_j     = j;
                 }
-            }
-            if (best_i >= 0) {
-                double w_i     = static_cast<double>(pixel_count[best_i]);
-                double w_j     = static_cast<double>(pixel_count[best_j]);
-                double w_total = w_i + w_j;
-                if (w_total > 0) {
-                    centroids[best_i].L = static_cast<float>(
-                        (w_i * centroids[best_i].L + w_j * centroids[best_j].L) / w_total);
-                    centroids[best_i].a = static_cast<float>(
-                        (w_i * centroids[best_i].a + w_j * centroids[best_j].a) / w_total);
-                    centroids[best_i].b = static_cast<float>(
-                        (w_i * centroids[best_i].b + w_j * centroids[best_j].b) / w_total);
-                }
-                pixel_count[best_i] += pixel_count[best_j];
-                alive[best_j] = false;
-                merged_any    = true;
-                ++merge_count;
             }
         }
-
-        if (merge_count > 0) {
-            std::vector<OkLabPixel> compacted;
-            compacted.reserve(K - merge_count);
-            for (int i = 0; i < K; ++i) {
-                if (alive[i]) compacted.push_back(centroids[i]);
+        if (best_i >= 0) {
+            double w_i     = static_cast<double>(pixel_count[best_i]);
+            double w_j     = static_cast<double>(pixel_count[best_j]);
+            double w_total = w_i + w_j;
+            if (w_total > 0) {
+                centroids[best_i].L = static_cast<float>(
+                    (w_i * centroids[best_i].L + w_j * centroids[best_j].L) / w_total);
+                centroids[best_i].a = static_cast<float>(
+                    (w_i * centroids[best_i].a + w_j * centroids[best_j].a) / w_total);
+                centroids[best_i].b = static_cast<float>(
+                    (w_i * centroids[best_i].b + w_j * centroids[best_j].b) / w_total);
             }
-            centroids = std::move(compacted);
-            K         = static_cast<int>(centroids.size());
-            spdlog::info("QuantizeColors: palette consolidation merged {} pairs, K={}", merge_count,
-                         K);
+            pixel_count[best_i] += pixel_count[best_j];
+            alive[best_j] = false;
+            merged_any    = true;
+            ++merge_count;
         }
     }
+
+    if (merge_count > 0) {
+        std::vector<OkLabPixel> compacted;
+        compacted.reserve(K - merge_count);
+        for (int i = 0; i < K; ++i) {
+            if (alive[i]) compacted.push_back(centroids[i]);
+        }
+        centroids = std::move(compacted);
+        spdlog::info("QuantizeColors: palette consolidation merged {} pairs, K={}", merge_count,
+                     centroids.size());
+    }
+}
+
+void SmoothLabels(cv::Mat& labels, const cv::Mat& bgr, const std::vector<OkLabPixel>& centroids) {
+    constexpr int kRadius             = 2;
+    constexpr float kMaxReassignDist2 = 0.04f * 0.04f;
+    const int K                       = static_cast<int>(centroids.size());
+    const int side                    = 2 * kRadius + 1;
+    const int half_window             = side * side / 2;
+    const int rows                    = bgr.rows;
+    const int cols                    = bgr.cols;
+
+    cv::Mat smoothed = labels.clone();
+    int reassigned   = 0;
+
+    for (int r = kRadius; r < rows - kRadius; ++r) {
+        const auto* brow = bgr.ptr<cv::Vec3b>(r);
+        const int* lrow  = labels.ptr<int>(r);
+        int* srow        = smoothed.ptr<int>(r);
+        for (int c = kRadius; c < cols - kRadius; ++c) {
+            int cur_label = lrow[c];
+
+            std::vector<int> freq(K, 0);
+            for (int dr = -kRadius; dr <= kRadius; ++dr) {
+                const int* nr = labels.ptr<int>(r + dr);
+                for (int dc = -kRadius; dc <= kRadius; ++dc) freq[nr[c + dc]]++;
+            }
+
+            int majority    = cur_label;
+            int majority_ct = freq[cur_label];
+            for (int k = 0; k < K; ++k) {
+                if (freq[k] > majority_ct) {
+                    majority_ct = freq[k];
+                    majority    = k;
+                }
+            }
+
+            if (majority == cur_label || majority_ct <= half_window) continue;
+
+            auto ok  = SrgbToOklab(brow[c][2], brow[c][1], brow[c][0]);
+            float dL = ok.L - centroids[majority].L;
+            float da = ok.a - centroids[majority].a;
+            float db = ok.b - centroids[majority].b;
+            if (dL * dL + da * da + db * db < kMaxReassignDist2) {
+                srow[c] = majority;
+                ++reassigned;
+            }
+        }
+    }
+    labels = smoothed;
+    spdlog::debug("QuantizeColors: spatial smoothing reassigned {} pixels", reassigned);
+}
+
+} // namespace
+
+QuantizeResult QuantizeColors(const cv::Mat& bgr, int num_colors) {
+    ColorGrid grid;
+    grid.Build(bgr);
+
+    auto centroids = RunMmcq(grid, num_colors);
+
+    std::vector<int> active_bins;
+    active_bins.reserve(kGridTotal);
+    for (int i = 0; i < kGridTotal; ++i) {
+        if (grid.bins[i].count > 0) active_bins.push_back(i);
+    }
+
+    RefineCentroidsKMeans(centroids, grid, active_bins);
+    ConsolidatePalette(centroids, grid, active_bins);
+
+    const int K    = static_cast<int>(centroids.size());
+    const int rows = bgr.rows;
+    const int cols = bgr.cols;
 
     QuantizeResult result;
     result.labels = cv::Mat(rows, cols, CV_32SC1);
@@ -565,70 +613,12 @@ QuantizeResult QuantizeColors(const cv::Mat& bgr, int num_colors) {
         const auto* brow = bgr.ptr<cv::Vec3b>(r);
         auto* lrow       = result.labels.ptr<int>(r);
         for (int c = 0; c < cols; ++c) {
-            auto ok         = SrgbToOklab(brow[c][2], brow[c][1], brow[c][0]);
-            float best_dist = 1e30f;
-            int best_label  = 0;
-            for (int i = 0; i < K; ++i) {
-                float dL = ok.L - centroids[i].L;
-                float da = ok.a - centroids[i].a;
-                float db = ok.b - centroids[i].b;
-                float d  = dL * dL + da * da + db * db;
-                if (d < best_dist) {
-                    best_dist  = d;
-                    best_label = i;
-                }
-            }
-            lrow[c] = best_label;
+            auto ok = SrgbToOklab(brow[c][2], brow[c][1], brow[c][0]);
+            lrow[c] = FindNearestCentroid(ok.L, ok.a, ok.b, centroids);
         }
     }
 
-    // ── Spatial label smoothing: majority vote filter ──────────────────────
-    {
-        constexpr int kRadius             = 2;
-        constexpr float kMaxReassignDist2 = 0.04f * 0.04f;
-        const int side                    = 2 * kRadius + 1;
-        const int half_window             = side * side / 2;
-
-        cv::Mat smoothed = result.labels.clone();
-        int reassigned   = 0;
-
-        for (int r = kRadius; r < rows - kRadius; ++r) {
-            const auto* brow = bgr.ptr<cv::Vec3b>(r);
-            const int* lrow  = result.labels.ptr<int>(r);
-            int* srow        = smoothed.ptr<int>(r);
-            for (int c = kRadius; c < cols - kRadius; ++c) {
-                int cur_label = lrow[c];
-
-                std::vector<int> freq(K, 0);
-                for (int dr = -kRadius; dr <= kRadius; ++dr) {
-                    const int* nr = result.labels.ptr<int>(r + dr);
-                    for (int dc = -kRadius; dc <= kRadius; ++dc) freq[nr[c + dc]]++;
-                }
-
-                int majority    = cur_label;
-                int majority_ct = freq[cur_label];
-                for (int k = 0; k < K; ++k) {
-                    if (freq[k] > majority_ct) {
-                        majority_ct = freq[k];
-                        majority    = k;
-                    }
-                }
-
-                if (majority == cur_label || majority_ct <= half_window) continue;
-
-                auto ok  = SrgbToOklab(brow[c][2], brow[c][1], brow[c][0]);
-                float dL = ok.L - centroids[majority].L;
-                float da = ok.a - centroids[majority].a;
-                float db = ok.b - centroids[majority].b;
-                if (dL * dL + da * da + db * db < kMaxReassignDist2) {
-                    srow[c] = majority;
-                    ++reassigned;
-                }
-            }
-        }
-        result.labels = smoothed;
-        spdlog::debug("QuantizeColors: spatial smoothing reassigned {} pixels", reassigned);
-    }
+    SmoothLabels(result.labels, bgr, centroids);
 
     for (int i = 0; i < K; ++i) {
         uint8_t r8, g8, b8;
@@ -640,7 +630,7 @@ QuantizeResult QuantizeColors(const cv::Mat& bgr, int num_colors) {
         result.centers_lab[i] = cv::Vec3f(cie_lab.l(), cie_lab.a(), cie_lab.b());
     }
 
-    spdlog::info("QuantizeColors: {} colors, {} pixels", K, total);
+    spdlog::info("QuantizeColors: {} colors, {} pixels", K, rows * cols);
     return result;
 }
 

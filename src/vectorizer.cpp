@@ -42,6 +42,17 @@ PreparedVectorizeInput PrepareVectorizeInput(const cv::Mat& input) {
     return prepared;
 }
 
+VectorizerResult VectorizeImpl(PreparedVectorizeInput& prepared, const VectorizerConfig& config,
+                               const char* tag) {
+    if (prepared.bgr.empty()) {
+        spdlog::error("Vectorize({}) failed: prepared image empty", tag);
+        throw std::runtime_error(std::string("Vectorize(") + tag + "): empty input");
+    }
+    return (config.pipeline_mode == PipelineMode::V2)
+               ? detail::RunPipelineV2(prepared.bgr, config, prepared.opaque_mask)
+               : detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
+}
+
 } // namespace
 
 VectorizerResult Vectorize(const std::string& image_path, const VectorizerConfig& config) {
@@ -50,13 +61,7 @@ VectorizerResult Vectorize(const std::string& image_path, const VectorizerConfig
     try {
         cv::Mat img   = detail::LoadImageIcc(image_path);
         auto prepared = PrepareVectorizeInput(img);
-        if (prepared.bgr.empty()) {
-            spdlog::error("Vectorize(file) failed: prepared image empty, path='{}'", image_path);
-            throw std::runtime_error("Failed to load image: " + image_path);
-        }
-        auto result = (config.pipeline_mode == PipelineMode::V2)
-                          ? detail::RunPipelineV2(prepared.bgr, config, prepared.opaque_mask)
-                          : detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
+        auto result   = VectorizeImpl(prepared, config, "file");
         const auto elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
                 .count();
@@ -83,13 +88,7 @@ VectorizerResult Vectorize(const uint8_t* image_data, size_t image_size,
     try {
         cv::Mat img   = detail::LoadImageIcc(image_data, image_size);
         auto prepared = PrepareVectorizeInput(img);
-        if (prepared.bgr.empty()) {
-            spdlog::error("Vectorize(buffer) failed: prepared image empty, bytes={}", image_size);
-            throw std::runtime_error("Failed to decode image buffer");
-        }
-        auto result = (config.pipeline_mode == PipelineMode::V2)
-                          ? detail::RunPipelineV2(prepared.bgr, config, prepared.opaque_mask)
-                          : detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
+        auto result   = VectorizeImpl(prepared, config, "buffer");
         const auto elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
                 .count();
@@ -115,13 +114,7 @@ VectorizerResult Vectorize(const cv::Mat& bgr_image, const VectorizerConfig& con
                  bgr_image.rows, bgr_image.channels());
     try {
         auto prepared = PrepareVectorizeInput(bgr_image);
-        if (prepared.bgr.empty()) {
-            spdlog::error("Vectorize(mat) failed: empty input image");
-            throw std::runtime_error("Empty input image");
-        }
-        auto result = (config.pipeline_mode == PipelineMode::V2)
-                          ? detail::RunPipelineV2(prepared.bgr, config, prepared.opaque_mask)
-                          : detail::RunPipeline(prepared.bgr, config, prepared.opaque_mask);
+        auto result   = VectorizeImpl(prepared, config, "mat");
         const auto elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
                 .count();

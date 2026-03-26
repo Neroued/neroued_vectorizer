@@ -3,23 +3,12 @@
 /// \file svg_writer.h
 /// \brief SVG document generation from vectorized shapes.
 
-#include "curve/bezier.h"
-#include <neroued/vectorizer/color.h>
+#include "detail/vectorized_shape.h"
 
 #include <string>
 #include <vector>
 
 namespace neroued::vectorizer::detail {
-
-struct VectorizedShape {
-    std::vector<BezierContour> contours;
-    Rgb color;
-    double area        = 0.0;
-    bool is_stroke     = false;
-    float stroke_width = 0.0f;
-
-    bool operator==(const VectorizedShape& o) const = delete;
-};
 
 /// Generate a complete SVG document string from vectorized shapes.
 ///

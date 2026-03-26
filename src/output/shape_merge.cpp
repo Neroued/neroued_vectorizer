@@ -1,4 +1,4 @@
-#include "output/shape_merge.h"
+#include "shape_merge.h"
 
 #include <spdlog/spdlog.h>
 

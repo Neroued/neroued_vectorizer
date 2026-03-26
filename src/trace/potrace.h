@@ -33,4 +33,7 @@ struct TracedBezierGroup {
 std::vector<TracedBezierGroup> TraceMaskWithPotraceBezier(const cv::Mat& mask, int turdsize = 2,
                                                           double opttolerance = 0.2);
 
+/// Convert a polygon ring to a degenerate linear BezierContour.
+BezierContour RingToBezier(const std::vector<Vec2f>& ring);
+
 } // namespace neroued::vectorizer::detail

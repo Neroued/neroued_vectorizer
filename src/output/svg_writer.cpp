@@ -1,4 +1,4 @@
-#include "output/svg_writer.h"
+#include "svg_writer.h"
 
 #include <spdlog/spdlog.h>
 

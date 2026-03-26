@@ -40,38 +40,6 @@ int GetLabel(const cv::Mat& labels, int r, int c) {
     return labels.at<int>(r, c);
 }
 
-std::set<int> UniqueLabels2x2(const cv::Mat& labels, int r, int c) {
-    std::set<int> s;
-    for (int dr = 0; dr < 2; ++dr) {
-        for (int dc = 0; dc < 2; ++dc) {
-            int l = GetLabel(labels, r + dr, c + dc);
-            if (l >= 0) s.insert(l);
-        }
-    }
-    return s;
-}
-
-bool IsJunction(const cv::Mat& labels, int r, int c) {
-    return UniqueLabels2x2(labels, r, c).size() >= 3;
-}
-
-bool IsBoundaryVertex(const cv::Mat& labels, int r, int c) {
-    return UniqueLabels2x2(labels, r, c).size() >= 2;
-}
-
-// Boundary vertices live on the dual grid at half-pixel positions.
-// Vertex (r,c) in the dual grid corresponds to the corner between pixels
-// (r,c), (r,c+1), (r+1,c), (r+1,c+1), i.e. position (c+0.5, r+0.5).
-// But for boundaries along the image border, vertices can be at edges.
-//
-// We define boundary vertices as points between pixel centers where the
-// label changes. We work on the "crack" grid: horizontal cracks between
-// rows r and r+1, vertical cracks between columns c and c+1.
-//
-// A simpler approach: scan all horizontal and vertical pixel edges,
-// mark those where labels differ, then find junctions (edge-grid vertices
-// with 3+ incident boundary cracks) and trace chains between junctions.
-
 struct CrackEdge {
     IVec2 v0, v1;
     int label_a, label_b;

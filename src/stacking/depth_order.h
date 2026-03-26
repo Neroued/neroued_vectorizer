@@ -3,8 +3,6 @@
 /// \file depth_order.h
 /// \brief Shape layer extraction and depth ordering for the stacking vectorization model.
 
-#include <neroued/vectorizer/color.h>
-
 #include <opencv2/core.hpp>
 
 #include <vector>

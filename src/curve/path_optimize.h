@@ -3,8 +3,8 @@
 /// \file path_optimize.h
 /// \brief Two-pass Bezier path optimization: near-linear merging and adjacent segment re-fitting.
 
-#include "curve/bezier.h"
-#include "output/svg_writer.h"
+#include "bezier.h"
+#include "detail/vectorized_shape.h"
 
 #include <vector>
 

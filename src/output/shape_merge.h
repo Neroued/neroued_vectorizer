@@ -3,7 +3,7 @@
 /// \file shape_merge.h
 /// \brief Shape bounding-box computation and Z-order-preserving same-color merging.
 
-#include "output/svg_writer.h"
+#include "detail/vectorized_shape.h"
 
 #include <neroued/vectorizer/vec2.h>
 

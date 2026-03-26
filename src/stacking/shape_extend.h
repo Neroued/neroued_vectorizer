@@ -3,7 +3,7 @@
 /// \file shape_extend.h
 /// \brief Morphological shape extension into occluded regions for gap-free stacking SVG.
 
-#include "stacking/depth_order.h"
+#include "depth_order.h"
 
 #include <vector>
 

@@ -57,19 +57,11 @@ std::vector<Vec2f> SimplifyRing(const std::vector<Vec2f>& ring, float eps) {
 }
 
 std::vector<Vec2f> ConvertCvContour(const std::vector<cv::Point>& contour, float eps) {
-    std::vector<cv::Point2f> in;
-    in.reserve(contour.size());
-    for (const auto& p : contour) in.push_back({static_cast<float>(p.x), static_cast<float>(p.y)});
-
-    std::vector<cv::Point2f> approx;
-    cv::approxPolyDP(in, approx, std::max(0.2f, eps), true);
-    if (approx.size() < 3) return {};
-
-    std::vector<Vec2f> out;
-    out.reserve(approx.size());
-    for (const auto& p : approx) out.push_back({p.x, p.y});
-    if (out.size() > 1 && (out.front() - out.back()).LengthSquared() < 1e-6f) out.pop_back();
-    return out;
+    std::vector<Vec2f> ring;
+    ring.reserve(contour.size());
+    for (const auto& p : contour)
+        ring.push_back({static_cast<float>(p.x), static_cast<float>(p.y)});
+    return SimplifyRing(ring, eps);
 }
 
 std::vector<TracedPolygonGroup> TraceMaskFallbackContours(const cv::Mat& mask,
@@ -232,19 +224,10 @@ void CollectBezierGroupsFromTree(const potrace_path_t* path_list,
 }
 
 BezierContour PointsToBezierContour(const std::vector<cv::Point>& pts) {
-    BezierContour bc;
-    bc.closed = true;
-    if (pts.size() < 3) return bc;
-    bc.segments.reserve(pts.size());
-    for (size_t i = 0; i < pts.size(); ++i) {
-        Vec2f a(static_cast<float>(pts[i].x), static_cast<float>(pts[i].y));
-        Vec2f b(static_cast<float>(pts[(i + 1) % pts.size()].x),
-                static_cast<float>(pts[(i + 1) % pts.size()].y));
-        Vec2f d = b - a;
-        if (d.LengthSquared() < 1e-8f) continue;
-        bc.segments.push_back({a, a + d * (1.0f / 3.0f), a + d * (2.0f / 3.0f), b});
-    }
-    return bc;
+    std::vector<Vec2f> ring;
+    ring.reserve(pts.size());
+    for (const auto& p : pts) ring.push_back({static_cast<float>(p.x), static_cast<float>(p.y)});
+    return RingToBezier(ring);
 }
 
 std::vector<TracedBezierGroup> FallbackBezierContours(const cv::Mat& mask) {
@@ -284,7 +267,56 @@ std::vector<TracedBezierGroup> FallbackBezierContours(const cv::Mat& mask) {
     return groups;
 }
 
+struct PotraceTraceResult {
+    potrace_state_t* state = nullptr;
+    bool incomplete        = false;
+    int path_count         = 0;
+};
+
+PotraceTraceResult RunPotraceTrace(const cv::Mat& mask, int turdsize, double opttolerance,
+                                   std::vector<potrace_word>& bitmap_storage) {
+    potrace_bitmap_t bm = BuildPotraceBitmap(mask, bitmap_storage);
+
+    potrace_param_t* params = potrace_param_default();
+    if (!params) throw std::runtime_error("potrace_param_default failed");
+    params->turdsize     = std::max(0, turdsize);
+    params->turnpolicy   = POTRACE_TURNPOLICY_MAJORITY;
+    params->alphamax     = 1.0;
+    params->opticurve    = 1;
+    params->opttolerance = std::clamp(opttolerance, 0.2, 2.0);
+
+    potrace_state_t* state = potrace_trace(params, &bm);
+    potrace_param_free(params);
+    if (!state) throw std::runtime_error("potrace_trace failed");
+
+    if (state->status != POTRACE_STATUS_OK && state->status != POTRACE_STATUS_INCOMPLETE) {
+        potrace_state_free(state);
+        throw std::runtime_error("potrace_trace returned invalid status");
+    }
+
+    PotraceTraceResult result;
+    result.state      = state;
+    result.incomplete = (state->status == POTRACE_STATUS_INCOMPLETE);
+    for (const potrace_path_t* p = state->plist; p; p = p->next) ++result.path_count;
+    return result;
+}
+
 } // namespace
+
+BezierContour RingToBezier(const std::vector<Vec2f>& ring) {
+    BezierContour contour;
+    contour.closed = true;
+    if (ring.size() < 3) return contour;
+    contour.segments.reserve(ring.size());
+    for (size_t i = 0; i < ring.size(); ++i) {
+        const Vec2f& a = ring[i];
+        const Vec2f& b = ring[(i + 1) % ring.size()];
+        Vec2f d        = b - a;
+        if (d.LengthSquared() < 1e-8f) continue;
+        contour.segments.push_back({a, a + d * (1.0f / 3.0f), a + d * (2.0f / 3.0f), b});
+    }
+    return contour;
+}
 
 double SignedArea(const std::vector<Vec2f>& ring) {
     if (ring.size() < 3) return 0.0;
@@ -309,32 +341,16 @@ std::vector<TracedPolygonGroup> TraceMaskWithPotrace(const cv::Mat& mask, float 
     spdlog::debug("TraceMaskWithPotrace start: mask={}x{}, nonzero={}, epsilon={:.3f}", mask.cols,
                   mask.rows, mask_nonzero, simplify_epsilon);
 
+    int turdsize        = std::max(0, static_cast<int>(std::lround(simplify_epsilon * 0.5f)));
+    double opttolerance = static_cast<double>(simplify_epsilon);
+
     std::vector<potrace_word> bitmap_storage;
-    potrace_bitmap_t bm = BuildPotraceBitmap(mask, bitmap_storage);
-
-    potrace_param_t* params = potrace_param_default();
-    if (!params) throw std::runtime_error("potrace_param_default failed");
-    params->turdsize     = std::max(0, static_cast<int>(std::lround(simplify_epsilon * 0.5f)));
-    params->turnpolicy   = POTRACE_TURNPOLICY_MAJORITY;
-    params->alphamax     = 1.0;
-    params->opticurve    = 1;
-    params->opttolerance = std::clamp(static_cast<double>(simplify_epsilon), 0.2, 2.0);
-
-    potrace_state_t* state = potrace_trace(params, &bm);
-    potrace_param_free(params);
-    if (!state) throw std::runtime_error("potrace_trace failed");
-
-    if (state->status != POTRACE_STATUS_OK && state->status != POTRACE_STATUS_INCOMPLETE) {
-        potrace_state_free(state);
-        throw std::runtime_error("potrace_trace returned invalid status");
-    }
-    if (state->status == POTRACE_STATUS_INCOMPLETE) {
+    auto tr = RunPotraceTrace(mask, turdsize, opttolerance, bitmap_storage);
+    if (tr.incomplete) {
         spdlog::warn("TraceMaskWithPotrace status incomplete: mask={}x{}", mask.cols, mask.rows);
     }
 
-    int path_count = 0;
-    for (const potrace_path_t* p = state->plist; p != nullptr; p = p->next) {
-        ++path_count;
+    for (const potrace_path_t* p = tr.state->plist; p; p = p->next) {
         auto ring = ConvertPathToRing(p, simplify_epsilon);
         if (ring.size() < 3) continue;
         double area = SignedArea(ring);
@@ -345,7 +361,7 @@ std::vector<TracedPolygonGroup> TraceMaskWithPotrace(const cv::Mat& mask, float 
         g.area  = std::abs(SignedArea(g.outer));
         if (g.area > std::numeric_limits<double>::epsilon()) groups.push_back(std::move(g));
     }
-    potrace_state_free(state);
+    potrace_state_free(tr.state);
 
     bool fallback_used = false;
     if (groups.empty()) {
@@ -361,7 +377,7 @@ std::vector<TracedPolygonGroup> TraceMaskWithPotrace(const cv::Mat& mask, float 
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     spdlog::debug("TraceMaskWithPotrace done: mask={}x{}, paths={}, groups={}, fallback_used={}, "
                   "elapsed_ms={:.2f}",
-                  mask.cols, mask.rows, path_count, groups.size(), fallback_used, elapsed_ms);
+                  mask.cols, mask.rows, tr.path_count, groups.size(), fallback_used, elapsed_ms);
     return groups;
 }
 
@@ -380,33 +396,14 @@ std::vector<TracedBezierGroup> TraceMaskWithPotraceBezier(const cv::Mat& mask, i
                   mask.cols, mask.rows, mask_nonzero, turdsize, opttolerance);
 
     std::vector<potrace_word> bitmap_storage;
-    potrace_bitmap_t bm = BuildPotraceBitmap(mask, bitmap_storage);
-
-    potrace_param_t* params = potrace_param_default();
-    if (!params) throw std::runtime_error("potrace_param_default failed");
-    params->turdsize     = std::max(0, turdsize);
-    params->turnpolicy   = POTRACE_TURNPOLICY_MAJORITY;
-    params->alphamax     = 1.0;
-    params->opticurve    = 1;
-    params->opttolerance = std::clamp(opttolerance, 0.2, 2.0);
-
-    potrace_state_t* state = potrace_trace(params, &bm);
-    potrace_param_free(params);
-    if (!state) throw std::runtime_error("potrace_trace failed");
-
-    if (state->status != POTRACE_STATUS_OK && state->status != POTRACE_STATUS_INCOMPLETE) {
-        potrace_state_free(state);
-        throw std::runtime_error("potrace_trace returned invalid status");
-    }
-    if (state->status == POTRACE_STATUS_INCOMPLETE) {
+    auto tr = RunPotraceTrace(mask, turdsize, opttolerance, bitmap_storage);
+    if (tr.incomplete) {
         spdlog::warn("TraceMaskWithPotraceBezier status incomplete: mask={}x{}", mask.cols,
                      mask.rows);
     }
 
-    int path_count = 0;
-    for (const potrace_path_t* p = state->plist; p != nullptr; p = p->next) ++path_count;
-    CollectBezierGroupsFromTree(state->plist, groups);
-    potrace_state_free(state);
+    CollectBezierGroupsFromTree(tr.state->plist, groups);
+    potrace_state_free(tr.state);
 
     bool fallback_used = false;
     if (groups.empty()) {
@@ -423,7 +420,7 @@ std::vector<TracedBezierGroup> TraceMaskWithPotraceBezier(const cv::Mat& mask, i
     spdlog::debug(
         "TraceMaskWithPotraceBezier done: mask={}x{}, paths={}, groups={}, fallback_used={}, "
         "elapsed_ms={:.2f}",
-        mask.cols, mask.rows, path_count, groups.size(), fallback_used, elapsed_ms);
+        mask.cols, mask.rows, tr.path_count, groups.size(), fallback_used, elapsed_ms);
     return groups;
 }
 

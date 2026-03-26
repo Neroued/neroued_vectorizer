@@ -30,13 +30,7 @@ inline float LinearToSrgb(float c) {
     return (c <= 0.0031308f) ? 12.92f * c : 1.055f * std::pow(c, 1.f / 2.4f) - 0.055f;
 }
 
-} // namespace oklab_internal
-
-inline OkLab SrgbToOklab(uint8_t r8, uint8_t g8, uint8_t b8) {
-    float r = oklab_internal::SrgbToLinear(r8 / 255.f);
-    float g = oklab_internal::SrgbToLinear(g8 / 255.f);
-    float b = oklab_internal::SrgbToLinear(b8 / 255.f);
-
+inline OkLab LinearRgbToOklab(float r, float g, float b) {
     float l = 0.4122214708f * r + 0.5363325363f * g + 0.0514459929f * b;
     float m = 0.2119034982f * r + 0.6806995451f * g + 0.1073969566f * b;
     float s = 0.0883024619f * r + 0.2817188376f * g + 0.6299787005f * b;
@@ -52,24 +46,18 @@ inline OkLab SrgbToOklab(uint8_t r8, uint8_t g8, uint8_t b8) {
     return lab;
 }
 
+} // namespace oklab_internal
+
+inline OkLab SrgbToOklab(uint8_t r8, uint8_t g8, uint8_t b8) {
+    return oklab_internal::LinearRgbToOklab(oklab_internal::SrgbToLinear(r8 / 255.f),
+                                            oklab_internal::SrgbToLinear(g8 / 255.f),
+                                            oklab_internal::SrgbToLinear(b8 / 255.f));
+}
+
 inline OkLab SrgbToOklab(float r01, float g01, float b01) {
-    float r = oklab_internal::SrgbToLinear(r01);
-    float g = oklab_internal::SrgbToLinear(g01);
-    float b = oklab_internal::SrgbToLinear(b01);
-
-    float l = 0.4122214708f * r + 0.5363325363f * g + 0.0514459929f * b;
-    float m = 0.2119034982f * r + 0.6806995451f * g + 0.1073969566f * b;
-    float s = 0.0883024619f * r + 0.2817188376f * g + 0.6299787005f * b;
-
-    l = std::cbrt(l);
-    m = std::cbrt(m);
-    s = std::cbrt(s);
-
-    OkLab lab;
-    lab.L = 0.2104542553f * l + 0.7936177850f * m - 0.0040720468f * s;
-    lab.a = 1.9779984951f * l - 2.4285922050f * m + 0.4505937099f * s;
-    lab.b = 0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * s;
-    return lab;
+    return oklab_internal::LinearRgbToOklab(oklab_internal::SrgbToLinear(r01),
+                                            oklab_internal::SrgbToLinear(g01),
+                                            oklab_internal::SrgbToLinear(b01));
 }
 
 inline void OklabToSrgb(const OkLab& lab, uint8_t& r8, uint8_t& g8, uint8_t& b8) {

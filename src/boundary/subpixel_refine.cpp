@@ -1,5 +1,7 @@
 #include "subpixel_refine.h"
 
+#include "detail/cv_utils.h"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -36,13 +38,6 @@ cv::Vec3f BilinearSampleLab(const cv::Mat& lab, float fx, float fy) {
     float w11 = u * v;
 
     return p00 * w00 + p01 * w01 + p10 * w10 + p11 * w11;
-}
-
-float LabDeltaE(const cv::Vec3f& a, const cv::Vec3f& b) {
-    float dL = a[0] - b[0];
-    float da = a[1] - b[1];
-    float db = a[2] - b[2];
-    return std::sqrt(dL * dL + da * da + db * db);
 }
 
 } // namespace
@@ -118,9 +113,9 @@ void RefineEdgesSubpixel(BoundaryGraph& graph, const cv::Mat& lab,
             int max_j    = 0;
             float max_gv = 0.0f;
             for (int j = 0; j < num_grads; ++j) {
-                float g = LabDeltaE(samples[static_cast<size_t>(j)],
-                                    samples[static_cast<size_t>(j + 1)]) /
-                          step;
+                float g =
+                    LabDist(samples[static_cast<size_t>(j)], samples[static_cast<size_t>(j + 1)]) /
+                    step;
                 grads[static_cast<size_t>(j)] = g;
                 if (g > max_gv) {
                     max_gv = g;
@@ -238,9 +233,9 @@ void RefineEdgesSubpixelAA(BoundaryGraph& graph, const cv::Mat& lab, const cv::M
             int max_j    = 0;
             float max_gv = 0.0f;
             for (int j = 0; j < num_grads; ++j) {
-                float g = LabDeltaE(samples[static_cast<size_t>(j)],
-                                    samples[static_cast<size_t>(j + 1)]) /
-                          step;
+                float g =
+                    LabDist(samples[static_cast<size_t>(j)], samples[static_cast<size_t>(j + 1)]) /
+                    step;
                 grads[static_cast<size_t>(j)] = g;
                 if (g > max_gv) {
                     max_gv = g;

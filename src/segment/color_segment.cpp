@@ -1,6 +1,7 @@
-#include "segment/color_segment.h"
+#include "color_segment.h"
 
-#include "segment/slic.h"
+#include "detail/cv_utils.h"
+#include "slic.h"
 
 #include <opencv2/imgproc.hpp>
 #include <spdlog/spdlog.h>
@@ -202,18 +203,12 @@ void RefineLabelsBoundary(cv::Mat& labels, const cv::Mat& unsmoothed_lab,
                 if (!has_different_neighbor) continue;
 
                 const cv::Vec3f& pixel = lab_row[c];
-                const cv::Vec3f& cur   = centers_lab[lid];
-                float d_current        = (pixel[0] - cur[0]) * (pixel[0] - cur[0]) +
-                                  (pixel[1] - cur[1]) * (pixel[1] - cur[1]) +
-                                  (pixel[2] - cur[2]) * (pixel[2] - cur[2]);
+                float d_current        = LabDistSq(pixel, centers_lab[lid]);
 
                 int best_label  = lid;
                 float best_dist = d_current;
                 for (int j = 0; j < neighbor_count; ++j) {
-                    const cv::Vec3f& cand = centers_lab[neighbor_set[j]];
-                    float d               = (pixel[0] - cand[0]) * (pixel[0] - cand[0]) +
-                              (pixel[1] - cand[1]) * (pixel[1] - cand[1]) +
-                              (pixel[2] - cand[2]) * (pixel[2] - cand[2]);
+                    float d = LabDistSq(pixel, centers_lab[neighbor_set[j]]);
                     if (d < best_dist) {
                         best_dist  = d;
                         best_label = neighbor_set[j];
@@ -296,10 +291,7 @@ void MergeSmallComponents(cv::Mat& labels, const cv::Mat& lab, std::vector<cv::V
                 for (const auto& [candidate, vote] : border_hist) {
                     if (candidate < 0 || candidate >= static_cast<int>(centers_lab.size()))
                         continue;
-                    float dl = mean_lab[0] - centers_lab[candidate][0];
-                    float da = mean_lab[1] - centers_lab[candidate][1];
-                    float db = mean_lab[2] - centers_lab[candidate][2];
-                    float d2 = dl * dl + da * da + db * db;
+                    float d2 = LabDistSq(mean_lab, centers_lab[candidate]);
                     if (d2 < best_dist || (d2 == best_dist && vote > best_border_vote)) {
                         best_border_vote = vote;
                         best_dist        = d2;
@@ -434,26 +426,24 @@ std::vector<Rgb> ComputePalette(const cv::Mat& bgr, const cv::Mat& labels, int n
     return palette;
 }
 
-// ── Auto color count estimation ──────────────────────────────────────────────
-//
-// Selects K that minimizes: reconstruction_error + fragmentation_penalty + complexity_cost.
-// Uses dual sampling (pixel sample for clustering, proxy image for spatial analysis).
+namespace {
 
-int EstimateOptimalColors(const cv::Mat& bgr) {
+struct ColorSampleData {
+    cv::Mat km_samples;
+    cv::Mat proxy_cielab;
+    cv::Mat proxy;
+    int n_samples;
+    int ch;
+    bool achromatic;
+    int proxy_area;
+    float tiny_px_threshold;
+};
+
+ColorSampleData BuildColorSamples(const cv::Mat& bgr) {
     constexpr int kTargetSamples            = 30000;
     constexpr int kProxyShortEdge           = 300;
     constexpr float kAchromaticP90Threshold = 8.0f;
-    constexpr int kCandidates[]             = {2, 3, 4, 6, 8, 12, 16, 24};
-    constexpr int kNumCandidates            = 8;
     constexpr float kTinyAreaFrac           = 0.002f;
-
-    constexpr float kW_meanDE   = 1.5f;
-    constexpr float kW_p95DE    = 0.5f;
-    constexpr float kW_tinyRate = 20.0f;
-    constexpr float kW_compDens = 20.0f;
-    constexpr float kW_logK     = 3.0f;
-
-    // ── 1. Dual sampling ─────────────────────────────────────────────────────
 
     const int total_px    = bgr.rows * bgr.cols;
     const float grid_step = std::sqrt(static_cast<float>(std::max(1, total_px)) / kTargetSamples);
@@ -488,8 +478,6 @@ int EstimateOptimalColors(const cv::Mat& bgr) {
     cv::cvtColor(proxy, proxy_lab8, cv::COLOR_BGR2Lab);
     const int proxy_area = proxy.rows * proxy.cols;
 
-    // ── 2. Achromatic detection (p90 chroma in LAB) ──────────────────────────
-
     std::vector<float> chromas(n_samples);
     for (int i = 0; i < n_samples; ++i) {
         const cv::Vec3b p = sample_lab8.at<cv::Vec3b>(i, 0);
@@ -500,8 +488,6 @@ int EstimateOptimalColors(const cv::Mat& bgr) {
     const int p90_idx = std::max(0, static_cast<int>(0.90f * (n_samples - 1)));
     std::nth_element(chromas.begin(), chromas.begin() + p90_idx, chromas.end());
     const bool achromatic = (chromas[p90_idx] < kAchromaticP90Threshold);
-
-    // ── 3. Convert to CIELAB float (L: 0-100, a/b: -128..127) ───────────────
 
     const int ch = achromatic ? 1 : 3;
 
@@ -529,91 +515,106 @@ int EstimateOptimalColors(const cv::Mat& bgr) {
         }
     }
 
-    const float tiny_px_threshold = proxy_area * kTinyAreaFrac;
+    return {km_samples, proxy_cielab, proxy,      n_samples,
+            ch,         achromatic,   proxy_area, proxy_area * kTinyAreaFrac};
+}
 
-    // ── 4. Evaluate each candidate K ─────────────────────────────────────────
+float ScoreCandidateK(int K, const ColorSampleData& data) {
+    constexpr float kW_meanDE   = 1.5f;
+    constexpr float kW_p95DE    = 0.5f;
+    constexpr float kW_tinyRate = 20.0f;
+    constexpr float kW_compDens = 20.0f;
+    constexpr float kW_logK     = 3.0f;
+
+    cv::Mat km_labels, km_centers;
+    cv::kmeans(data.km_samples, K, km_labels,
+               cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 20, 0.5), 3,
+               cv::KMEANS_PP_CENTERS, km_centers);
+
+    cv::Mat proxy_labels(data.proxy.rows, data.proxy.cols, CV_32SC1);
+    std::vector<float> dE_vec(data.proxy_area);
+
+    for (int i = 0; i < data.proxy_area; ++i) {
+        float min_sq = std::numeric_limits<float>::max();
+        int lbl      = 0;
+        for (int k = 0; k < km_centers.rows; ++k) {
+            float sq = 0.0f;
+            for (int d = 0; d < data.ch; ++d) {
+                const float diff = data.proxy_cielab.at<float>(i, d) - km_centers.at<float>(k, d);
+                sq += diff * diff;
+            }
+            if (sq < min_sq) {
+                min_sq = sq;
+                lbl    = k;
+            }
+        }
+        proxy_labels.at<int>(i / data.proxy.cols, i % data.proxy.cols) = lbl;
+        dE_vec[i]                                                      = std::sqrt(min_sq);
+    }
+
+    float sum_dE = 0.0f;
+    for (float d : dE_vec) sum_dE += d;
+    const float mean_dE = sum_dE / std::max(1, data.proxy_area);
+
+    const int p95 = std::max(0, static_cast<int>(0.95f * (data.proxy_area - 1)));
+    std::nth_element(dE_vec.begin(), dE_vec.begin() + p95, dE_vec.end());
+    const float p95_dE = dE_vec[p95];
+
+    int total_comp = 0;
+    int tiny_comp  = 0;
+    for (int label = 0; label < km_centers.rows; ++label) {
+        cv::Mat mask;
+        cv::compare(proxy_labels, label, mask, cv::CMP_EQ);
+        if (cv::countNonZero(mask) == 0) continue;
+
+        cv::Mat cc_labels;
+        int n_cc = cv::connectedComponents(mask, cc_labels, 8, CV_32S) - 1;
+        total_comp += n_cc;
+
+        std::vector<int> areas(n_cc + 1, 0);
+        for (int r = 0; r < cc_labels.rows; ++r) {
+            const int* row = cc_labels.ptr<int>(r);
+            for (int c2 = 0; c2 < cc_labels.cols; ++c2)
+                if (row[c2] > 0) areas[row[c2]]++;
+        }
+        for (int cc_id = 1; cc_id <= n_cc; ++cc_id)
+            if (static_cast<float>(areas[cc_id]) < data.tiny_px_threshold) ++tiny_comp;
+    }
+
+    const float tiny_rate    = (total_comp > 0) ? static_cast<float>(tiny_comp) / total_comp : 0.0f;
+    const float comp_density = static_cast<float>(total_comp) / std::max(1, data.proxy_area);
+    const float log2K        = std::log2(static_cast<float>(K));
+
+    const float score = kW_meanDE * mean_dE + kW_p95DE * p95_dE + kW_tinyRate * tiny_rate +
+                        kW_compDens * comp_density + kW_logK * log2K;
+
+    spdlog::debug("AutoColor K={:2d}: dE_mean={:.2f} dE_p95={:.2f} tiny={:.3f} "
+                  "comp_dens={:.5f} log2K={:.2f} => score={:.2f}",
+                  K, mean_dE, p95_dE, tiny_rate, comp_density, log2K, score);
+    return score;
+}
+
+} // namespace
+
+int EstimateOptimalColors(const cv::Mat& bgr) {
+    constexpr int kCandidates[]  = {2, 3, 4, 6, 8, 12, 16, 24};
+    constexpr int kNumCandidates = 8;
+
+    auto data = BuildColorSamples(bgr);
 
     int best_k       = 16;
     float best_score = std::numeric_limits<float>::max();
-
     for (int ci = 0; ci < kNumCandidates; ++ci) {
         const int K = kCandidates[ci];
-        if (K > n_samples) break;
-
-        cv::Mat km_labels, km_centers;
-        cv::kmeans(km_samples, K, km_labels,
-                   cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 20, 0.5), 3,
-                   cv::KMEANS_PP_CENTERS, km_centers);
-
-        cv::Mat proxy_labels(proxy.rows, proxy.cols, CV_32SC1);
-        std::vector<float> dE_vec(proxy_area);
-
-        for (int i = 0; i < proxy_area; ++i) {
-            float min_sq = std::numeric_limits<float>::max();
-            int lbl      = 0;
-            for (int k = 0; k < km_centers.rows; ++k) {
-                float sq = 0.0f;
-                for (int d = 0; d < ch; ++d) {
-                    const float diff = proxy_cielab.at<float>(i, d) - km_centers.at<float>(k, d);
-                    sq += diff * diff;
-                }
-                if (sq < min_sq) {
-                    min_sq = sq;
-                    lbl    = k;
-                }
-            }
-            proxy_labels.at<int>(i / proxy.cols, i % proxy.cols) = lbl;
-            dE_vec[i]                                            = std::sqrt(min_sq);
-        }
-
-        float sum_dE = 0.0f;
-        for (float d : dE_vec) sum_dE += d;
-        const float mean_dE = sum_dE / std::max(1, proxy_area);
-
-        const int p95 = std::max(0, static_cast<int>(0.95f * (proxy_area - 1)));
-        std::nth_element(dE_vec.begin(), dE_vec.begin() + p95, dE_vec.end());
-        const float p95_dE = dE_vec[p95];
-
-        int total_comp = 0;
-        int tiny_comp  = 0;
-        for (int label = 0; label < km_centers.rows; ++label) {
-            cv::Mat mask;
-            cv::compare(proxy_labels, label, mask, cv::CMP_EQ);
-            if (cv::countNonZero(mask) == 0) continue;
-
-            cv::Mat cc_labels;
-            int n_cc = cv::connectedComponents(mask, cc_labels, 8, CV_32S) - 1;
-            total_comp += n_cc;
-
-            std::vector<int> areas(n_cc + 1, 0);
-            for (int r = 0; r < cc_labels.rows; ++r) {
-                const int* row = cc_labels.ptr<int>(r);
-                for (int c2 = 0; c2 < cc_labels.cols; ++c2)
-                    if (row[c2] > 0) areas[row[c2]]++;
-            }
-            for (int cc_id = 1; cc_id <= n_cc; ++cc_id)
-                if (static_cast<float>(areas[cc_id]) < tiny_px_threshold) ++tiny_comp;
-        }
-
-        const float tiny_rate =
-            (total_comp > 0) ? static_cast<float>(tiny_comp) / total_comp : 0.0f;
-        const float comp_density = static_cast<float>(total_comp) / std::max(1, proxy_area);
-        const float log2K        = std::log2(static_cast<float>(K));
-
-        const float score = kW_meanDE * mean_dE + kW_p95DE * p95_dE + kW_tinyRate * tiny_rate +
-                            kW_compDens * comp_density + kW_logK * log2K;
-
-        spdlog::debug("AutoColor K={:2d}: dE_mean={:.2f} dE_p95={:.2f} tiny={:.3f} "
-                      "comp_dens={:.5f} log2K={:.2f} => score={:.2f}",
-                      K, mean_dE, p95_dE, tiny_rate, comp_density, log2K, score);
-
+        if (K > data.n_samples) break;
+        float score = ScoreCandidateK(K, data);
         if (score < best_score) {
             best_score = score;
             best_k     = K;
         }
     }
 
-    spdlog::info("AutoColor: achromatic={}, selected K={} (score={:.2f})", achromatic, best_k,
+    spdlog::info("AutoColor: achromatic={}, selected K={} (score={:.2f})", data.achromatic, best_k,
                  best_score);
     return best_k;
 }

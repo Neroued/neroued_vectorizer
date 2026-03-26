@@ -12,17 +12,6 @@ namespace neroued::vectorizer::detail {
 
 namespace {
 
-double PolylineSignedArea(const std::vector<Vec2f>& pts) {
-    if (pts.size() < 3) return 0.0;
-    double acc = 0.0;
-    for (size_t i = 0; i < pts.size(); ++i) {
-        const Vec2f& a = pts[i];
-        const Vec2f& b = pts[(i + 1) % pts.size()];
-        acc += static_cast<double>(a.x) * b.y - static_cast<double>(b.x) * a.y;
-    }
-    return 0.5 * acc;
-}
-
 BezierContour MakeDegenerateBezierContour(const std::vector<Vec2f>& pts, bool closed) {
     BezierContour bc;
     bc.closed = closed;
@@ -36,41 +25,6 @@ BezierContour MakeDegenerateBezierContour(const std::vector<Vec2f>& pts, bool cl
         bc.segments.push_back({a, a + d * (1.0f / 3.0f), a + d * (2.0f / 3.0f), b});
     }
     return bc;
-}
-
-BezierContour PointsToBezierContour(const std::vector<Vec2f>& pts, bool closed,
-                                    const CurveFitConfig* fit_cfg) {
-    BezierContour bc;
-    bc.closed = closed;
-    if (pts.size() < 2) return bc;
-
-    if (fit_cfg && pts.size() >= 3) {
-        auto fitted =
-            closed ? FitBezierToClosedPolyline(pts, *fit_cfg) : FitBezierToPolyline(pts, *fit_cfg);
-        if (!fitted.empty()) {
-            // Area-ratio sanity check for closed contours
-            bool valid = true;
-            if (closed) {
-                BezierContour tmp;
-                tmp.closed       = true;
-                tmp.segments     = fitted;
-                double bez_area  = std::abs(BezierContourSignedArea(tmp));
-                double poly_area = std::abs(PolylineSignedArea(pts));
-                if (poly_area > 1.0 && (bez_area < poly_area * 0.3 || bez_area > poly_area * 3.0)) {
-                    valid = false;
-                    spdlog::debug("PointsToBezierContour fallback: invalid area ratio, points={}, "
-                                  "poly_area={:.3f}, bezier_area={:.3f}",
-                                  pts.size(), poly_area, bez_area);
-                }
-            }
-            if (valid) {
-                bc.segments = std::move(fitted);
-                return bc;
-            }
-        }
-    }
-
-    return MakeDegenerateBezierContour(pts, closed);
 }
 
 bool PointInPolygon(const Vec2f& p, const std::vector<Vec2f>& poly) {
@@ -138,67 +92,6 @@ void AppendEdgePoints(const BoundaryGraph& graph, const OrientedEdgeRef& ref,
     }
 }
 
-std::vector<std::vector<Vec2f>> ChainEdgesIntoLoops(const BoundaryGraph& graph,
-                                                    const std::vector<OrientedEdgeRef>& refs) {
-    std::vector<std::vector<Vec2f>> loops;
-    if (refs.empty()) return loops;
-
-    std::unordered_map<int, std::vector<int>> node_to_refs;
-    for (int i = 0; i < static_cast<int>(refs.size()); ++i) {
-        int sn = EdgeStartNode(graph, refs[i]);
-        node_to_refs[sn].push_back(i);
-    }
-
-    std::vector<bool> used(refs.size(), false);
-
-    for (int seed = 0; seed < static_cast<int>(refs.size()); ++seed) {
-        if (used[seed]) continue;
-
-        std::vector<Vec2f> loop;
-        int cur = seed;
-        bool ok = true;
-
-        while (true) {
-            if (used[cur]) {
-                ok = (cur == seed && !loop.empty());
-                break;
-            }
-            used[cur] = true;
-            AppendEdgePoints(graph, refs[cur], loop, !loop.empty());
-
-            int end_node = EdgeEndNode(graph, refs[cur]);
-            auto it      = node_to_refs.find(end_node);
-            if (it == node_to_refs.end()) {
-                ok = false;
-                break;
-            }
-
-            int next = -1;
-            for (int ri : it->second) {
-                if (!used[ri]) {
-                    next = ri;
-                    break;
-                }
-            }
-            if (next < 0) {
-                // Check if we've closed the loop back to seed
-                if (EdgeStartNode(graph, refs[seed]) == end_node && !loop.empty()) { ok = true; }
-                break;
-            }
-            cur = next;
-        }
-
-        if (!ok || loop.size() < 3) continue;
-
-        // Remove duplicate closing point if present
-        if (loop.size() > 1 && (loop.front() - loop.back()).LengthSquared() < 1e-6f) {
-            loop.pop_back();
-        }
-        if (loop.size() >= 3) { loops.push_back(std::move(loop)); }
-    }
-    return loops;
-}
-
 void DecimateNearCollinear(std::vector<Vec2f>& pts, float epsilon) {
     constexpr int kMinPoints = 6;
     constexpr int kMaxPasses = 3;
@@ -244,18 +137,6 @@ void DecimateNearCollinear(std::vector<Vec2f>& pts, float epsilon) {
     }
 }
 
-float LocalCurvature(const std::vector<Vec2f>& pts, int i, int n) {
-    int im1    = ((i - 1) % n + n) % n;
-    int ip1    = (i + 1) % n;
-    Vec2f v1   = pts[i] - pts[im1];
-    Vec2f v2   = pts[ip1] - pts[i];
-    float len1 = v1.Length();
-    float len2 = v2.Length();
-    if (len1 < 1e-6f || len2 < 1e-6f) return 0.0f;
-    float cross = std::abs(v1.x * v2.y - v1.y * v2.x);
-    return cross / (len1 * len2);
-}
-
 void SmoothOpenChain(std::vector<Vec2f>& pts, float max_displacement, int iterations) {
     if (pts.size() < 5) return;
     const int n = static_cast<int>(pts.size());
@@ -274,48 +155,8 @@ void SmoothOpenChain(std::vector<Vec2f>& pts, float max_displacement, int iterat
     }
 }
 
-void SmoothClosedLoop(std::vector<Vec2f>& pts, float max_displacement, int iterations) {
-    if (pts.size() < 5) return;
-    const int n = static_cast<int>(pts.size());
-
-    constexpr float kHighCurvature = 0.5f;
-
-    for (int iter = 0; iter < iterations; ++iter) {
-        std::vector<Vec2f> prev_pts = pts;
-        std::vector<Vec2f> smoothed(n);
-        for (int i = 0; i < n; ++i) {
-            int im2 = ((i - 2) % n + n) % n;
-            int im1 = ((i - 1) % n + n) % n;
-            int ip1 = (i + 1) % n;
-            int ip2 = (i + 2) % n;
-            smoothed[i] =
-                (pts[im2] + pts[im1] * 4.0f + pts[i] * 6.0f + pts[ip1] * 4.0f + pts[ip2]) *
-                (1.0f / 16.0f);
-        }
-        for (int i = 0; i < n; ++i) {
-            float curv        = LocalCurvature(prev_pts, i, n);
-            float attenuation = (curv > kHighCurvature) ? std::max(0.1f, 1.0f - curv) : 1.0f;
-            float local_max   = max_displacement * attenuation;
-
-            Vec2f delta = smoothed[i] - prev_pts[i];
-            float dist  = delta.Length();
-            if (dist > local_max) { smoothed[i] = prev_pts[i] + delta * (local_max / dist); }
-        }
-        pts = std::move(smoothed);
-    }
-}
-
 CubicBezier ReverseBezierSegment(const CubicBezier& seg) {
     return {seg.p3, seg.p2, seg.p1, seg.p0};
-}
-
-std::vector<CubicBezier> ReverseBezierChain(const std::vector<CubicBezier>& chain) {
-    std::vector<CubicBezier> rev;
-    rev.reserve(chain.size());
-    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-        rev.push_back(ReverseBezierSegment(*it));
-    }
-    return rev;
 }
 
 struct EdgeRefLoop {
@@ -376,18 +217,6 @@ std::vector<EdgeRefLoop> ChainEdgeRefsIntoLoops(const BoundaryGraph& graph,
         if (ok && !loop.refs.empty()) { loops.push_back(std::move(loop)); }
     }
     return loops;
-}
-
-double BezierChainSignedArea(const std::vector<CubicBezier>& segs) {
-    std::vector<Vec2f> pts;
-    pts.reserve(segs.size() * 4);
-    for (const auto& s : segs) {
-        pts.push_back(s.p0);
-        pts.push_back(s.p1);
-        pts.push_back(s.p2);
-    }
-    if (!segs.empty()) pts.push_back(segs.back().p3);
-    return PolylineSignedArea(pts);
 }
 
 } // namespace

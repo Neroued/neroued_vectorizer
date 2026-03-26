@@ -1,4 +1,4 @@
-#include "stacking/shape_extend.h"
+#include "shape_extend.h"
 
 #include <opencv2/imgproc.hpp>
 #include <spdlog/spdlog.h>

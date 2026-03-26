@@ -4,8 +4,7 @@
 /// \brief Skeleton-based thin-line vectorization via Zhang-Suen thinning.
 
 #include "curve/bezier.h"
-#include "segment/morphology.h"
-#include "output/svg_writer.h"
+#include "detail/vectorized_shape.h"
 
 #include <opencv2/core.hpp>
 

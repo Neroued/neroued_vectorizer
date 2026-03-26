@@ -1,10 +1,9 @@
-#include "curve/path_optimize.h"
+#include "path_optimize.h"
 
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <cmath>
-#include <numeric>
 #include <vector>
 
 namespace neroued::vectorizer::detail {
@@ -27,10 +26,6 @@ float MaxControlPointDeviation(const CubicBezier& seg) {
 }
 
 bool IsNearLinear(const CubicBezier& seg, float eps) { return MaxControlPointDeviation(seg) < eps; }
-
-CubicBezier MakeLinearSegment(const Vec2f& a, const Vec2f& b) {
-    return {a, Vec2f::Lerp(a, b, 1.f / 3.f), Vec2f::Lerp(a, b, 2.f / 3.f), b};
-}
 
 std::vector<Vec2f> SampleBezier(const CubicBezier& b, int n) {
     std::vector<Vec2f> pts;
@@ -63,7 +58,7 @@ CubicBezier FitCubicToPoints(const std::vector<Vec2f>& pts) {
     Vec2f p0 = pts.front();
     Vec2f p3 = pts.back();
 
-    if (pts.size() == 2) return MakeLinearSegment(p0, p3);
+    if (pts.size() == 2) return MakeLinearBezier(p0, p3);
 
     const int n = static_cast<int>(pts.size());
     std::vector<float> params(n);
@@ -168,10 +163,10 @@ void OptimizeBezierContour(BezierContour& contour, float linear_eps, float merge
                     // Degenerate: keep the individual segments as lines instead.
                     for (size_t k = i; k < j; ++k) {
                         pass1.push_back(
-                            MakeLinearSegment(contour.segments[k].p0, contour.segments[k].p3));
+                            MakeLinearBezier(contour.segments[k].p0, contour.segments[k].p3));
                     }
                 } else {
-                    pass1.push_back(MakeLinearSegment(start, end));
+                    pass1.push_back(MakeLinearBezier(start, end));
                 }
                 i = j;
             } else {

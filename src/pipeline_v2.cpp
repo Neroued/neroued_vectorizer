@@ -51,14 +51,14 @@ void MergeSameColorShapesV2(std::vector<VectorizedShape>& shapes, float min_area
         auto& cur = merged.back();
         size_t j  = i + 1;
 
-        auto ColorKey = [](const Rgb& c) -> uint64_t {
+        auto color_key = [](const Rgb& c) -> uint64_t {
             uint8_t r8, g8, b8;
             c.ToRgb255(r8, g8, b8);
             return (static_cast<uint64_t>(r8) << 16) | (static_cast<uint64_t>(g8) << 8) | b8;
         };
 
-        uint64_t cur_key = ColorKey(cur.color);
-        while (j < shapes.size() && ColorKey(shapes[j].color) == cur_key) {
+        uint64_t cur_key = color_key(cur.color);
+        while (j < shapes.size() && color_key(shapes[j].color) == cur_key) {
             for (auto& contour : shapes[j].contours) { cur.contours.push_back(std::move(contour)); }
             cur.area += shapes[j].area;
             ++j;
@@ -196,10 +196,10 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
     gt_labels.release();
 
     // ── 8. Per-layer Potrace tracing ────────────────────────────────────────
-    const float trace_eps =
-        std::max(0.2f, std::clamp(cfg.contour_simplify * 0.45f + 0.2f, 0.2f, 2.0f));
-    const int turdsize        = std::max(0, static_cast<int>(std::lround(trace_eps * 0.5f)));
-    const double opttolerance = std::clamp(static_cast<double>(trace_eps), 0.2, 2.0);
+    auto tp                   = DeriveTraceParams(cfg.contour_simplify);
+    const float trace_eps     = tp.trace_eps;
+    const int turdsize        = tp.turdsize;
+    const double opttolerance = tp.opttolerance;
 
     std::vector<VectorizedShape> shapes;
     shapes.reserve(layers.size());
@@ -272,31 +272,8 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
     }
     labels.release();
 
-    // ── 11. Rescale coordinates to original image size ──────────────────────
-    if (scaled) {
-        const float inv = 1.0f / scale;
-        for (auto& shape : shapes) {
-            for (auto& contour : shape.contours) {
-                for (auto& s : contour.segments) {
-                    s.p0 = s.p0 * inv;
-                    s.p1 = s.p1 * inv;
-                    s.p2 = s.p2 * inv;
-                    s.p3 = s.p3 * inv;
-                }
-            }
-        }
-    }
-
-    const float fw = static_cast<float>(bgr.cols);
-    const float fh = static_cast<float>(bgr.rows);
-    for (auto& shape : shapes) {
-        for (auto& contour : shape.contours) {
-            for (auto& s : contour.segments) {
-                s.p0 = {std::clamp(s.p0.x, 0.f, fw), std::clamp(s.p0.y, 0.f, fh)};
-                s.p3 = {std::clamp(s.p3.x, 0.f, fw), std::clamp(s.p3.y, 0.f, fh)};
-            }
-        }
-    }
+    if (scaled) { RescaleShapes(shapes, 1.0f / scale); }
+    ClampShapesToBounds(shapes, static_cast<float>(bgr.cols), static_cast<float>(bgr.rows), false);
 
     // ── 12. Build result ────────────────────────────────────────────────────
     VectorizerResult result;

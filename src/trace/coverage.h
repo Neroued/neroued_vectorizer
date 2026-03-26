@@ -3,7 +3,7 @@
 /// \file coverage.h
 /// \brief Coverage validation and patching for vectorized output.
 
-#include "output/svg_writer.h"
+#include "detail/vectorized_shape.h"
 
 #include <opencv2/core.hpp>
 

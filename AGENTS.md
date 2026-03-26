@@ -37,7 +37,7 @@
 - `src/stacking/`：V2 层叠模型（深度排序、形状延伸）
 - `src/quantize/`：V2 OKLab MMCQ 颜色量化
 - `src/output/`：SVG 文档生成、同色形状合并
-- `src/detail/`：内部工具（OpenCV 辅助、ICC 色彩管理）
+- `src/detail/`：内部工具（OpenCV 辅助、ICC 色彩管理、VectorizedShape 核心类型）
 - `python/`：Python 绑定（pybind11 绑定代码、Python 包、测试）
 - `eval/`：质量评估库（像素/边缘/路径指标、基线对比）
 - `apps/`：CLI 工具（raster_to_svg、evaluate_svg）

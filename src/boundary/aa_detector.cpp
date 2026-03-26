@@ -1,5 +1,7 @@
 #include "aa_detector.h"
 
+#include "detail/cv_utils.h"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -9,13 +11,6 @@
 namespace neroued::vectorizer::detail {
 
 namespace {
-
-float LabDist(const cv::Vec3f& a, const cv::Vec3f& b) {
-    float dL = a[0] - b[0];
-    float da = a[1] - b[1];
-    float db = a[2] - b[2];
-    return std::sqrt(dL * dL + da * da + db * db);
-}
 
 bool IsBoundaryPixel(const cv::Mat& labels, int r, int c) {
     int lbl = labels.at<int>(r, c);

@@ -4,7 +4,6 @@
 /// \brief Schneider cubic Bezier fitting and corner detection for boundary edges.
 
 #include "bezier.h"
-#include "boundary/boundary_graph.h"
 
 #include <vector>
 
@@ -39,10 +38,6 @@ std::vector<CubicBezier> FitBezierToPolyline(const std::vector<Vec2f>& pts,
 /// curve chain closes smoothly without a "cutting chord" artifact.
 std::vector<CubicBezier> FitBezierToClosedPolyline(const std::vector<Vec2f>& pts,
                                                    const CurveFitConfig& cfg = {});
-
-/// Fit Bezier curves to all edges of a BoundaryGraph in-place.
-/// Returns the total number of edges that fell back to polyline.
-int FitBezierOnGraph(BoundaryGraph& graph, const CurveFitConfig& cfg = {});
 
 /// Merge consecutive near-linear Bezier segments into single curves.
 /// \param segments  Bezier segment list (modified in-place).

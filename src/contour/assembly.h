@@ -6,7 +6,7 @@
 #include "curve/bezier.h"
 #include "boundary/boundary_graph.h"
 #include "curve/fitting.h"
-#include "output/svg_writer.h"
+#include "detail/vectorized_shape.h"
 
 #include <vector>
 

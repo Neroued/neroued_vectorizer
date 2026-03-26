@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <numeric>
 #include <vector>
 
 namespace neroued::vectorizer::detail {
@@ -11,12 +10,6 @@ namespace neroued::vectorizer::detail {
 namespace {
 
 constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
-
-float AngleBetween(Vec2f a, Vec2f b) {
-    float dot   = a.Dot(b);
-    float cross = a.Cross(b);
-    return std::atan2(cross, dot);
-}
 
 Vec2f EstimateTangent(const std::vector<Vec2f>& pts, int idx, bool forward) {
     int n = static_cast<int>(pts.size());
@@ -45,31 +38,6 @@ std::vector<float> ChordLengthParameterize(const std::vector<Vec2f>& pts) {
     return u;
 }
 
-Vec2f BezierEval(Vec2f p0, Vec2f p1, Vec2f p2, Vec2f p3, float t) {
-    float s = 1.0f - t;
-    return p0 * (s * s * s) + p1 * (3.0f * s * s * t) + p2 * (3.0f * s * t * t) + p3 * (t * t * t);
-}
-
-Vec2f BezierDerivEval(Vec2f p0, Vec2f p1, Vec2f p2, Vec2f p3, float t) {
-    float s  = 1.0f - t;
-    Vec2f d1 = (p1 - p0) * 3.0f;
-    Vec2f d2 = (p2 - p1) * 3.0f;
-    Vec2f d3 = (p3 - p2) * 3.0f;
-    return d1 * (s * s) + d2 * (2.0f * s * t) + d3 * (t * t);
-}
-
-Vec2f BezierDeriv2Eval(Vec2f p0, Vec2f p1, Vec2f p2, Vec2f p3, float t) {
-    float s  = 1.0f - t;
-    Vec2f d1 = (p2 - p1 * 2.0f + p0) * 6.0f;
-    Vec2f d2 = (p3 - p2 * 2.0f + p1) * 6.0f;
-    return d1 * s + d2 * t;
-}
-
-CubicBezier MakeLinearBezier(Vec2f a, Vec2f b) {
-    Vec2f d = b - a;
-    return {a, a + d * (1.0f / 3.0f), a + d * (2.0f / 3.0f), b};
-}
-
 CubicBezier FitSingleBezier(const std::vector<Vec2f>& pts, const std::vector<float>& u,
                             Vec2f tan_left, Vec2f tan_right) {
     int n = static_cast<int>(pts.size());
@@ -91,7 +59,7 @@ CubicBezier FitSingleBezier(const std::vector<Vec2f>& pts, const std::vector<flo
         Vec2f a1 = tan_left * b1;
         Vec2f a2 = tan_right * b2;
 
-        Vec2f tmp = pts[i] - BezierEval(p0, p0, p3, p3, t);
+        Vec2f tmp = pts[i] - EvalBezier(p0, p0, p3, p3, t);
 
         c00 += a1.Dot(a1);
         c01 += a1.Dot(a2);
@@ -127,7 +95,7 @@ float ComputeMaxError(const std::vector<Vec2f>& pts, const std::vector<float>& u
     float max_err = 0.0f;
     split_idx     = static_cast<int>(pts.size()) / 2;
     for (int i = 1; i < static_cast<int>(pts.size()) - 1; ++i) {
-        Vec2f p   = BezierEval(bez.p0, bez.p1, bez.p2, bez.p3, u[i]);
+        Vec2f p   = EvalBezier(bez.p0, bez.p1, bez.p2, bez.p3, u[i]);
         float err = (p - pts[i]).LengthSquared();
         if (err > max_err) {
             max_err   = err;
@@ -140,9 +108,9 @@ float ComputeMaxError(const std::vector<Vec2f>& pts, const std::vector<float>& u
 void Reparameterize(const std::vector<Vec2f>& pts, std::vector<float>& u, const CubicBezier& bez) {
     for (int i = 0; i < static_cast<int>(pts.size()); ++i) {
         float t    = u[i];
-        Vec2f b    = BezierEval(bez.p0, bez.p1, bez.p2, bez.p3, t);
-        Vec2f d1   = BezierDerivEval(bez.p0, bez.p1, bez.p2, bez.p3, t);
-        Vec2f d2   = BezierDeriv2Eval(bez.p0, bez.p1, bez.p2, bez.p3, t);
+        Vec2f b    = EvalBezier(bez.p0, bez.p1, bez.p2, bez.p3, t);
+        Vec2f d1   = EvalBezierDeriv(bez.p0, bez.p1, bez.p2, bez.p3, t);
+        Vec2f d2   = EvalBezierSecondDeriv(bez.p0, bez.p1, bez.p2, bez.p3, t);
         Vec2f diff = b - pts[i];
 
         float num   = diff.Dot(d1);
@@ -493,31 +461,6 @@ void MergeNearLinearSegments(std::vector<CubicBezier>& segments, float tolerance
     }
 
     segments = std::move(merged);
-}
-
-int FitBezierOnGraph(BoundaryGraph& graph, const CurveFitConfig& cfg) {
-    int fallback_count = 0;
-    for (auto& edge : graph.edges) {
-        if (edge.points.size() < 3) {
-            ++fallback_count;
-            continue;
-        }
-        auto fitted         = FitBezierToPolyline(edge.points, cfg);
-        bool has_real_curve = false;
-        for (const auto& b : fitted) {
-            Vec2f chord     = b.p3 - b.p0;
-            float chord_len = chord.Length();
-            if (chord_len < 1e-6f) continue;
-            float d1 = std::abs((b.p1 - b.p0).Cross(chord)) / chord_len;
-            float d2 = std::abs((b.p2 - b.p3).Cross(chord)) / chord_len;
-            if (d1 > 0.1f || d2 > 0.1f) {
-                has_real_curve = true;
-                break;
-            }
-        }
-        if (!has_real_curve && edge.points.size() >= 3) { ++fallback_count; }
-    }
-    return fallback_count;
 }
 
 } // namespace neroued::vectorizer::detail

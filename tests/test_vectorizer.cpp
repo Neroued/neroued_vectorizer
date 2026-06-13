@@ -2,6 +2,7 @@
 
 #include <neroued/vectorizer/vectorizer.h>
 #include "curve/bezier.h"
+#include "output/svg_writer.h"
 #include "trace/coverage.h"
 
 #include <nanosvg/nanosvg.h>
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace neroued::vectorizer;
@@ -150,6 +152,55 @@ bool SameColor(const Rgb& a, const Rgb& b) {
            std::abs(a.b() - b.b()) < 1e-4f;
 }
 
+bool HasRectShape(const std::vector<detail::VectorizedShape>& shapes, const Rgb& color, float x0,
+                  float y0, float x1, float y1) {
+    constexpr float kTol = 1e-4f;
+    for (const auto& shape : shapes) {
+        if (!SameColor(shape.color, color) || shape.contours.size() != 1) continue;
+        const auto& contour = shape.contours.front();
+        if (contour.segments.size() != 4) continue;
+
+        float min_x = std::numeric_limits<float>::max();
+        float min_y = std::numeric_limits<float>::max();
+        float max_x = std::numeric_limits<float>::lowest();
+        float max_y = std::numeric_limits<float>::lowest();
+        for (const auto& seg : contour.segments) {
+            for (const Vec2f& p : {seg.p0, seg.p1, seg.p2, seg.p3}) {
+                min_x = std::min(min_x, p.x);
+                min_y = std::min(min_y, p.y);
+                max_x = std::max(max_x, p.x);
+                max_y = std::max(max_y, p.y);
+            }
+        }
+
+        if (std::abs(min_x - x0) < kTol && std::abs(min_y - y0) < kTol &&
+            std::abs(max_x - x1) < kTol && std::abs(max_y - y1) < kTol) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int CountUncoveredSourcePixels(const std::vector<detail::VectorizedShape>& shapes,
+                               const cv::Mat& labels, int width, int height) {
+    auto svg    = detail::WriteSvg(shapes, width, height, false, 0.5f);
+    auto raster = RasterizeSvg(svg, width, height);
+
+    cv::Mat source_mask(height, width, CV_8UC1, cv::Scalar(0));
+    for (int y = 0; y < height; ++y) {
+        const int* label_row = labels.ptr<int>(y);
+        uint8_t* out         = source_mask.ptr<uint8_t>(y);
+        for (int x = 0; x < width; ++x) {
+            if (label_row[x] >= 0) out[x] = 255;
+        }
+    }
+
+    cv::Mat missing;
+    cv::bitwise_not(raster.coverage, missing);
+    cv::bitwise_and(missing, source_mask, missing);
+    return cv::countNonZero(missing);
+}
+
 } // namespace
 
 TEST(Vectorizer, KeepsTopLeftRegionAndNoNegativePathCoords) {
@@ -206,6 +257,7 @@ TEST(Vectorizer, CoverageGuardPatchesLocalGapEvenWhenGlobalRatioPasses) {
     detail::ApplyCoverageGuard(shapes, labels, palette, 0.995f, 0.45f, 1.0f);
 
     EXPECT_GT(shapes.size(), before);
+    EXPECT_EQ(CountUncoveredSourcePixels(shapes, labels, width, height), 0);
 }
 
 TEST(Vectorizer, CoverageGuardSplitsPatchColorsBySourceLabel) {
@@ -239,6 +291,33 @@ TEST(Vectorizer, CoverageGuardSplitsPatchColorsBySourceLabel) {
 
     EXPECT_GT(red_patches, 0);
     EXPECT_GT(blue_patches, 0);
+}
+
+TEST(Vectorizer, CoverageGuardAddsPixelBoundaryUnderpaint) {
+    const int width  = 12;
+    const int height = 12;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(0));
+    std::vector<Rgb> palette = {Rgb(0.0f, 0.5f, 1.0f)};
+
+    std::vector<detail::VectorizedShape> shapes;
+    shapes.push_back(RectShape(1.0f, 1.0f, 10.0f, 10.0f, palette[0]));
+
+    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f);
+
+    EXPECT_TRUE(HasRectShape(shapes, palette[0], 0.0f, 0.0f, 12.0f, 1.0f));
+    EXPECT_TRUE(HasRectShape(shapes, palette[0], 0.0f, 11.0f, 12.0f, 12.0f));
+}
+
+TEST(Vectorizer, CoverageGuardHandlesEmptySourceMask) {
+    const int width  = 12;
+    const int height = 12;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(-1));
+    std::vector<Rgb> palette = {Rgb(0.0f, 0.5f, 1.0f)};
+    std::vector<detail::VectorizedShape> shapes;
+
+    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f);
+
+    EXPECT_TRUE(shapes.empty());
 }
 
 TEST(Vectorizer, TransparentPngDoesNotLeakHiddenRgb) {

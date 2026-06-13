@@ -391,6 +391,10 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
         ApplyCoverageGuard(shapes, seg.labels, palette, effective_coverage_ratio, trace_eps,
                            std::max(1.0f, cfg.min_contour_area * 0.5f));
         const auto added = shapes.size() >= before ? (shapes.size() - before) : 0;
+        if (added > 0) {
+            std::rotate(shapes.begin(), shapes.begin() + static_cast<ptrdiff_t>(before),
+                        shapes.end());
+        }
         spdlog::info("V1: coverage guard applied: added_shapes={}", added);
     }
 

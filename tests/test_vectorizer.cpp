@@ -2,6 +2,7 @@
 
 #include <neroued/vectorizer/vectorizer.h>
 #include "curve/bezier.h"
+#include "trace/coverage.h"
 
 #include <nanosvg/nanosvg.h>
 #include <opencv2/core.hpp>
@@ -124,6 +125,31 @@ VectorizerConfig BaseConfig() {
     return cfg;
 }
 
+detail::BezierContour RectContour(float x0, float y0, float x1, float y1) {
+    detail::BezierContour contour;
+    contour.segments = {
+        detail::MakeLinearBezier({x0, y0}, {x1, y0}),
+        detail::MakeLinearBezier({x1, y0}, {x1, y1}),
+        detail::MakeLinearBezier({x1, y1}, {x0, y1}),
+        detail::MakeLinearBezier({x0, y1}, {x0, y0}),
+    };
+    contour.closed = true;
+    return contour;
+}
+
+detail::VectorizedShape RectShape(float x0, float y0, float x1, float y1, Rgb color) {
+    detail::VectorizedShape shape;
+    shape.contours.push_back(RectContour(x0, y0, x1, y1));
+    shape.color = color;
+    shape.area  = static_cast<double>((x1 - x0) * (y1 - y0));
+    return shape;
+}
+
+bool SameColor(const Rgb& a, const Rgb& b) {
+    return std::abs(a.r() - b.r()) < 1e-4f && std::abs(a.g() - b.g()) < 1e-4f &&
+           std::abs(a.b() - b.b()) < 1e-4f;
+}
+
 } // namespace
 
 TEST(Vectorizer, KeepsTopLeftRegionAndNoNegativePathCoords) {
@@ -162,6 +188,57 @@ TEST(Vectorizer, CoverageNearFullForSolidPartitionImage) {
     double ratio = (total > 0) ? static_cast<double>(filled) / static_cast<double>(total) : 0.0;
 
     EXPECT_GT(ratio, 0.995);
+}
+
+TEST(Vectorizer, CoverageGuardPatchesLocalGapEvenWhenGlobalRatioPasses) {
+    const int width  = 64;
+    const int height = 64;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(0));
+    std::vector<Rgb> palette = {Rgb(1.0f, 0.0f, 0.0f)};
+
+    std::vector<detail::VectorizedShape> shapes;
+    shapes.push_back(RectShape(0.0f, 0.0f, 63.0f, 31.0f, palette[0]));
+    shapes.push_back(RectShape(0.0f, 34.0f, 63.0f, 63.0f, palette[0]));
+    shapes.push_back(RectShape(0.0f, 32.0f, 31.0f, 34.0f, palette[0]));
+    shapes.push_back(RectShape(34.0f, 32.0f, 63.0f, 34.0f, palette[0]));
+
+    const size_t before = shapes.size();
+    detail::ApplyCoverageGuard(shapes, labels, palette, 0.995f, 0.45f, 1.0f);
+
+    EXPECT_GT(shapes.size(), before);
+}
+
+TEST(Vectorizer, CoverageGuardSplitsPatchColorsBySourceLabel) {
+    const int width  = 64;
+    const int height = 64;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(0));
+    for (int y = 0; y < height; ++y) {
+        int* row = labels.ptr<int>(y);
+        for (int x = 32; x < width; ++x) row[x] = 1;
+    }
+
+    std::vector<Rgb> palette = {Rgb(1.0f, 0.0f, 0.0f), Rgb(0.0f, 0.0f, 1.0f)};
+
+    std::vector<detail::VectorizedShape> shapes;
+    shapes.push_back(RectShape(0.0f, 0.0f, 29.0f, 63.0f, palette[0]));
+    shapes.push_back(RectShape(30.0f, 0.0f, 31.0f, 29.0f, palette[0]));
+    shapes.push_back(RectShape(30.0f, 34.0f, 31.0f, 63.0f, palette[0]));
+    shapes.push_back(RectShape(34.0f, 0.0f, 63.0f, 63.0f, palette[1]));
+    shapes.push_back(RectShape(32.0f, 0.0f, 33.0f, 29.0f, palette[1]));
+    shapes.push_back(RectShape(32.0f, 34.0f, 33.0f, 63.0f, palette[1]));
+
+    const size_t before = shapes.size();
+    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f);
+
+    int red_patches  = 0;
+    int blue_patches = 0;
+    for (size_t i = before; i < shapes.size(); ++i) {
+        if (SameColor(shapes[i].color, palette[0])) ++red_patches;
+        if (SameColor(shapes[i].color, palette[1])) ++blue_patches;
+    }
+
+    EXPECT_GT(red_patches, 0);
+    EXPECT_GT(blue_patches, 0);
 }
 
 TEST(Vectorizer, TransparentPngDoesNotLeakHiddenRgb) {

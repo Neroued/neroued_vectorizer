@@ -51,14 +51,15 @@ cv::Mat RasterizeCoverage(const std::vector<VectorizedShape>& shapes, int width,
 struct GapInfo {
     cv::Mat coverage;
     cv::Mat cc_labels;
-    int ncc        = 0;
-    int source_px  = 0;
-    int covered_px = 0;
-    float ratio    = 0.0f;
+    int ncc                   = 0;
+    int source_px             = 0;
+    int covered_px            = 0;
+    int max_missing_component = 0;
+    float ratio               = 0.0f;
 };
 
 bool FindCoverageGaps(const std::vector<VectorizedShape>& shapes, const cv::Mat& labels,
-                      float min_ratio, int w, int h, GapInfo& out) {
+                      float min_ratio, float max_unpatched_gap_area, int w, int h, GapInfo& out) {
     cv::Mat source_mask(h, w, CV_8UC1, cv::Scalar(0));
     for (int r = 0; r < h; ++r) {
         const int* row = labels.ptr<int>(r);
@@ -83,18 +84,38 @@ bool FindCoverageGaps(const std::vector<VectorizedShape>& shapes, const cv::Mat&
     cv::bitwise_not(out.coverage, missing);
     cv::bitwise_and(missing, source_mask, missing);
 
-    out.ncc = cv::connectedComponents(missing, out.cc_labels, 8, CV_32S);
+    cv::Mat stats;
+    cv::Mat centroids;
+    out.ncc = cv::connectedComponentsWithStats(missing, out.cc_labels, stats, centroids, 8, CV_32S);
     if (out.ncc <= 1) {
         spdlog::debug("CoverageGuard no missing connected components");
         return false;
     }
-    if (out.ratio >= min_ratio) {
-        spdlog::debug(
-            "CoverageGuard local gaps detected: coverage_ratio={:.4f} >= min_ratio={:.4f}",
-            out.ratio, min_ratio);
-    } else {
+
+    for (int cid = 1; cid < out.ncc; ++cid) {
+        out.max_missing_component =
+            std::max(out.max_missing_component, stats.at<int>(cid, cv::CC_STAT_AREA));
+    }
+
+    const bool global_trigger = out.ratio < min_ratio;
+    const bool local_trigger =
+        max_unpatched_gap_area >= 0.0f &&
+        out.max_missing_component > static_cast<int>(std::floor(max_unpatched_gap_area));
+    if (!global_trigger && !local_trigger) {
+        spdlog::debug("CoverageGuard skipped: coverage_ratio={:.4f} >= min_ratio={:.4f}, "
+                      "max_missing_component={} <= max_unpatched_gap_area={:.1f}",
+                      out.ratio, min_ratio, out.max_missing_component, max_unpatched_gap_area);
+        return false;
+    }
+
+    if (global_trigger) {
         spdlog::warn("CoverageGuard triggered: coverage_ratio={:.4f} < min_ratio={:.4f}", out.ratio,
                      min_ratio);
+    } else {
+        spdlog::debug(
+            "CoverageGuard local gap triggered: coverage_ratio={:.4f} >= min_ratio={:.4f}, "
+            "max_missing_component={} > max_unpatched_gap_area={:.1f}",
+            out.ratio, min_ratio, out.max_missing_component, max_unpatched_gap_area);
     }
     return true;
 }
@@ -188,64 +209,18 @@ std::vector<TracedPolygonGroup> BuildTinyMaskFallbackGroups(const cv::Mat& mask,
     return groups;
 }
 
-PatchStats AddLabelUnderpaintShapes(std::vector<VectorizedShape>& shapes, const cv::Mat& labels,
-                                    const std::vector<Rgb>& palette, float tracing_epsilon,
-                                    float min_patch_area) {
-    PatchStats stats;
-    if (labels.empty() || palette.empty()) return stats;
-
-    cv::Mat source_mask(labels.rows, labels.cols, CV_8UC1, cv::Scalar(0));
-    for (int r = 0; r < labels.rows; ++r) {
-        const int* lb_row = labels.ptr<int>(r);
-        uint8_t* out      = source_mask.ptr<uint8_t>(r);
-        for (int c = 0; c < labels.cols; ++c) {
-            if (lb_row[c] >= 0) out[c] = 255;
-        }
-    }
-
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-    for (int label = 0; label < static_cast<int>(palette.size()); ++label) {
-        cv::Mat label_mask(labels.rows, labels.cols, CV_8UC1, cv::Scalar(0));
-        for (int r = 0; r < labels.rows; ++r) {
-            const int* lb_row = labels.ptr<int>(r);
-            uint8_t* out      = label_mask.ptr<uint8_t>(r);
-            for (int c = 0; c < labels.cols; ++c) {
-                if (lb_row[c] == label) out[c] = 255;
-            }
-        }
-        if (cv::countNonZero(label_mask) < static_cast<int>(std::max(1.0f, min_patch_area))) {
-            continue;
-        }
-
-        cv::Mat underpaint_mask;
-        cv::dilate(label_mask, underpaint_mask, kernel, cv::Point(-1, -1), 1);
-        cv::bitwise_and(underpaint_mask, source_mask, underpaint_mask);
-
-        auto traced = TraceMaskWithPotrace(underpaint_mask, tracing_epsilon * 0.8f);
-        auto fixed = RepairTopology(traced, tracing_epsilon * 0.6f, min_patch_area, min_patch_area);
-        if (fixed.empty()) { fixed = BuildTinyMaskFallbackGroups(underpaint_mask, min_patch_area); }
-        for (const auto& group : fixed) {
-            auto patch = BuildPatchShape(group, palette[label], {0.0f, 0.0f});
-            if (patch.contours.empty()) continue;
-            shapes.push_back(std::move(patch));
-            ++stats.added;
-            ++stats.underpaint_added;
-        }
-    }
-    return stats;
-}
-
 void AddHorizontalBoundaryRuns(std::vector<VectorizedShape>& shapes, PatchStats& stats,
                                const cv::Mat& labels, const std::vector<Rgb>& palette, int row,
-                               float y0, float y1) {
+                               float y0, float y1, const cv::Mat& cc_labels) {
     const int width = labels.cols;
     if (row < 0 || row >= labels.rows || y1 <= y0) return;
 
     const int* label_row = labels.ptr<int>(row);
-    int run_label        = width > 0 ? label_row[0] : -1;
+    const int* cc_row    = cc_labels.ptr<int>(row);
+    int run_label        = (width > 0 && cc_row[0] > 0) ? label_row[0] : -1;
     int run_start        = 0;
     for (int x = 1; x <= width; ++x) {
-        int label = (x < width) ? label_row[x] : -1;
+        int label = (x < width && cc_row[x] > 0) ? label_row[x] : -1;
         if (label == run_label) continue;
 
         if (run_label >= 0 && run_label < static_cast<int>(palette.size()) && x > run_start) {
@@ -262,13 +237,13 @@ void AddHorizontalBoundaryRuns(std::vector<VectorizedShape>& shapes, PatchStats&
 
 void AddVerticalBoundaryRuns(std::vector<VectorizedShape>& shapes, PatchStats& stats,
                              const cv::Mat& labels, const std::vector<Rgb>& palette, int col,
-                             int y_begin, int y_end, float x0, float x1) {
+                             int y_begin, int y_end, float x0, float x1, const cv::Mat& cc_labels) {
     if (col < 0 || col >= labels.cols || y_begin >= y_end || x1 <= x0) return;
 
-    int run_label = labels.ptr<int>(y_begin)[col];
+    int run_label = cc_labels.ptr<int>(y_begin)[col] > 0 ? labels.ptr<int>(y_begin)[col] : -1;
     int run_start = y_begin;
     for (int y = y_begin + 1; y <= y_end; ++y) {
-        int label = (y < y_end) ? labels.ptr<int>(y)[col] : -1;
+        int label = (y < y_end && cc_labels.ptr<int>(y)[col] > 0) ? labels.ptr<int>(y)[col] : -1;
         if (label == run_label) continue;
 
         if (run_label >= 0 && run_label < static_cast<int>(palette.size()) && y > run_start) {
@@ -284,9 +259,9 @@ void AddVerticalBoundaryRuns(std::vector<VectorizedShape>& shapes, PatchStats& s
 }
 
 PatchStats AddBoundaryUnderpaintShapes(std::vector<VectorizedShape>& shapes, const cv::Mat& labels,
-                                       const std::vector<Rgb>& palette) {
+                                       const std::vector<Rgb>& palette, const GapInfo& gaps) {
     PatchStats stats;
-    if (labels.empty() || palette.empty()) return stats;
+    if (labels.empty() || palette.empty() || gaps.cc_labels.empty()) return stats;
 
     constexpr int kBoundaryUnderpaintPx = 4;
     const int width                     = labels.cols;
@@ -295,12 +270,12 @@ PatchStats AddBoundaryUnderpaintShapes(std::vector<VectorizedShape>& shapes, con
 
     for (int y = 0; y < band; ++y) {
         AddHorizontalBoundaryRuns(shapes, stats, labels, palette, y, static_cast<float>(y),
-                                  static_cast<float>(y + 1));
+                                  static_cast<float>(y + 1), gaps.cc_labels);
     }
     for (int y = height - band; y < height; ++y) {
         if (y >= band) {
             AddHorizontalBoundaryRuns(shapes, stats, labels, palette, y, static_cast<float>(y),
-                                      static_cast<float>(y + 1));
+                                      static_cast<float>(y + 1), gaps.cc_labels);
         }
     }
 
@@ -310,13 +285,13 @@ PatchStats AddBoundaryUnderpaintShapes(std::vector<VectorizedShape>& shapes, con
         for (int x = 0; x < band; ++x) {
             AddVerticalBoundaryRuns(shapes, stats, labels, palette, x, vertical_y_begin,
                                     vertical_y_end, static_cast<float>(x),
-                                    static_cast<float>(x + 1));
+                                    static_cast<float>(x + 1), gaps.cc_labels);
         }
         for (int x = width - band; x < width; ++x) {
             if (x >= band) {
                 AddVerticalBoundaryRuns(shapes, stats, labels, palette, x, vertical_y_begin,
                                         vertical_y_end, static_cast<float>(x),
-                                        static_cast<float>(x + 1));
+                                        static_cast<float>(x + 1), gaps.cc_labels);
             }
         }
     }
@@ -451,7 +426,7 @@ PatchStats PatchMissingRegions(std::vector<VectorizedShape>& shapes, const GapIn
 
 void ApplyCoverageGuard(std::vector<VectorizedShape>& shapes, const cv::Mat& labels,
                         const std::vector<Rgb>& palette, float min_ratio, float tracing_epsilon,
-                        float min_patch_area) {
+                        float min_patch_area, float max_unpatched_gap_area) {
     if (labels.empty() || labels.type() != CV_32SC1) {
         spdlog::warn("CoverageGuard skipped: invalid labels (empty={} type={})", labels.empty(),
                      labels.empty() ? -1 : labels.type());
@@ -466,13 +441,19 @@ void ApplyCoverageGuard(std::vector<VectorizedShape>& shapes, const cv::Mat& lab
     constexpr int kMaxPatchPasses = 3;
     PatchStats total_stats;
     GapInfo last_gaps;
-    int passes = 0;
+    GapInfo initial_gaps;
+    bool has_initial_gaps = false;
+    int passes            = 0;
 
     for (int pass = 0; pass < kMaxPatchPasses; ++pass) {
         GapInfo gaps;
-        if (!FindCoverageGaps(shapes, labels, min_ratio, w, h, gaps)) {
+        if (!FindCoverageGaps(shapes, labels, min_ratio, max_unpatched_gap_area, w, h, gaps)) {
             last_gaps = std::move(gaps);
             break;
+        }
+        if (!has_initial_gaps) {
+            initial_gaps     = gaps;
+            has_initial_gaps = true;
         }
         last_gaps = gaps;
 
@@ -482,24 +463,21 @@ void ApplyCoverageGuard(std::vector<VectorizedShape>& shapes, const cv::Mat& lab
         ++passes;
         if (stats.added <= 0) break;
     }
-    if (total_stats.added > 0) {
-        auto underpaint_stats =
-            AddLabelUnderpaintShapes(shapes, labels, palette, tracing_epsilon, min_patch_area);
-        AccumulatePatchStats(total_stats, underpaint_stats);
-    }
-    if (passes > 0) {
-        auto boundary_stats = AddBoundaryUnderpaintShapes(shapes, labels, palette);
+    if (has_initial_gaps) {
+        auto boundary_stats = AddBoundaryUnderpaintShapes(shapes, labels, palette, initial_gaps);
         AccumulatePatchStats(total_stats, boundary_stats);
     }
 
     const auto elapsed_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     spdlog::info(
-        "CoverageGuard done: source_px={}, covered_px={}, ratio={:.4f}, ncc={}, passes={}, "
+        "CoverageGuard done: source_px={}, covered_px={}, ratio={:.4f}, ncc={}, "
+        "max_missing_component={}, max_unpatched_gap_area={:.1f}, passes={}, "
         "eligible={}, patched_components={}, patch_shapes_added={}, underpaint_shapes_added={}, "
         "boundary_underpaint_shapes_added={}, invalid_label_skips={}, elapsed_ms={:.2f}",
-        last_gaps.source_px, last_gaps.covered_px, last_gaps.ratio, last_gaps.ncc, passes,
-        total_stats.eligible, total_stats.patched, total_stats.added - total_stats.underpaint_added,
+        last_gaps.source_px, last_gaps.covered_px, last_gaps.ratio, last_gaps.ncc,
+        last_gaps.max_missing_component, max_unpatched_gap_area, passes, total_stats.eligible,
+        total_stats.patched, total_stats.added - total_stats.underpaint_added,
         total_stats.underpaint_added, total_stats.boundary_underpaint_added, total_stats.bad_labels,
         elapsed_ms);
 }

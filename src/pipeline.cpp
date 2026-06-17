@@ -389,7 +389,7 @@ VectorizerResult RunPipeline(const cv::Mat& bgr, const VectorizerConfig& cfg,
         }
         const auto before = shapes.size();
         ApplyCoverageGuard(shapes, seg.labels, palette, effective_coverage_ratio, trace_eps,
-                           std::max(1.0f, cfg.min_contour_area * 0.5f));
+                           std::max(1.0f, cfg.min_contour_area * 0.5f), cfg.max_unpatched_gap_area);
         const auto added = shapes.size() >= before ? (shapes.size() - before) : 0;
         if (added > 0) {
             std::rotate(shapes.begin(), shapes.begin() + static_cast<ptrdiff_t>(before),

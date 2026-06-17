@@ -276,7 +276,8 @@ std::ofstream("output.svg") << result.svg_content;
 | `min_hole_area` | float | 4.0 | V1+V2 | 最小孔洞面积 |
 | `contour_simplify` | float | 0.45 | V1+V2 | 轮廓简化强度 |
 | `enable_coverage_fix` | bool | true | V1+V2 | 启用覆盖率修补 |
-| `min_coverage_ratio` | float | 0.998 | V1+V2 | 触发修补的最低覆盖率 |
+| `min_coverage_ratio` | float | 0.998 | V1+V2 | 全局覆盖率触发阈值；值越低越容忍少量缺失像素 |
+| `max_unpatched_gap_area` | float | 0.0 | V1+V2 | 局部缺口面积触发阈值；超过该面积即使全局覆盖率达标也会修补，负数表示禁用局部触发 |
 | **诊断** | | | | |
 | `enable_depth_validation` | bool | false | V2 | 启用深度排序诊断验证 |
 

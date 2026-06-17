@@ -239,6 +239,8 @@ TEST(Vectorizer, CoverageNearFullForSolidPartitionImage) {
     double ratio = (total > 0) ? static_cast<double>(filled) / static_cast<double>(total) : 0.0;
 
     EXPECT_GT(ratio, 0.995);
+    EXPECT_LT(out.num_shapes, 20);
+    EXPECT_LT(out.svg_content.size(), 6000U);
 }
 
 TEST(Vectorizer, CoverageGuardPatchesLocalGapEvenWhenGlobalRatioPasses) {
@@ -254,10 +256,29 @@ TEST(Vectorizer, CoverageGuardPatchesLocalGapEvenWhenGlobalRatioPasses) {
     shapes.push_back(RectShape(34.0f, 32.0f, 63.0f, 34.0f, palette[0]));
 
     const size_t before = shapes.size();
-    detail::ApplyCoverageGuard(shapes, labels, palette, 0.995f, 0.45f, 1.0f);
+    detail::ApplyCoverageGuard(shapes, labels, palette, 0.995f, 0.45f, 1.0f, 0.0f);
 
     EXPECT_GT(shapes.size(), before);
     EXPECT_EQ(CountUncoveredSourcePixels(shapes, labels, width, height), 0);
+}
+
+TEST(Vectorizer, CoverageGuardCanDisableLocalGapTrigger) {
+    const int width  = 64;
+    const int height = 64;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(0));
+    std::vector<Rgb> palette = {Rgb(1.0f, 0.0f, 0.0f)};
+
+    std::vector<detail::VectorizedShape> shapes;
+    shapes.push_back(RectShape(0.0f, 0.0f, 63.0f, 31.0f, palette[0]));
+    shapes.push_back(RectShape(0.0f, 34.0f, 63.0f, 63.0f, palette[0]));
+    shapes.push_back(RectShape(0.0f, 32.0f, 31.0f, 34.0f, palette[0]));
+    shapes.push_back(RectShape(34.0f, 32.0f, 63.0f, 34.0f, palette[0]));
+
+    const size_t before = shapes.size();
+    detail::ApplyCoverageGuard(shapes, labels, palette, 0.90f, 0.45f, 1.0f, -1.0f);
+
+    EXPECT_EQ(shapes.size(), before);
+    EXPECT_GT(CountUncoveredSourcePixels(shapes, labels, width, height), 0);
 }
 
 TEST(Vectorizer, CoverageGuardSplitsPatchColorsBySourceLabel) {
@@ -280,7 +301,7 @@ TEST(Vectorizer, CoverageGuardSplitsPatchColorsBySourceLabel) {
     shapes.push_back(RectShape(32.0f, 34.0f, 33.0f, 63.0f, palette[1]));
 
     const size_t before = shapes.size();
-    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f);
+    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f, 0.0f);
 
     int red_patches  = 0;
     int blue_patches = 0;
@@ -291,6 +312,16 @@ TEST(Vectorizer, CoverageGuardSplitsPatchColorsBySourceLabel) {
 
     EXPECT_GT(red_patches, 0);
     EXPECT_GT(blue_patches, 0);
+
+    auto svg            = detail::WriteSvg(shapes, width, height, false, 0.5f);
+    auto raster         = RasterizeSvg(svg, width, height);
+    cv::Vec3b red_seam  = raster.bgr.at<cv::Vec3b>(32, 30);
+    cv::Vec3b blue_seam = raster.bgr.at<cv::Vec3b>(32, 33);
+
+    EXPECT_GT(static_cast<int>(red_seam[2]), 200);
+    EXPECT_LT(static_cast<int>(red_seam[0]), 80);
+    EXPECT_GT(static_cast<int>(blue_seam[0]), 200);
+    EXPECT_LT(static_cast<int>(blue_seam[2]), 80);
 }
 
 TEST(Vectorizer, CoverageGuardAddsPixelBoundaryUnderpaint) {
@@ -302,7 +333,7 @@ TEST(Vectorizer, CoverageGuardAddsPixelBoundaryUnderpaint) {
     std::vector<detail::VectorizedShape> shapes;
     shapes.push_back(RectShape(1.0f, 1.0f, 10.0f, 10.0f, palette[0]));
 
-    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f);
+    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f, 0.0f);
 
     EXPECT_TRUE(HasRectShape(shapes, palette[0], 0.0f, 0.0f, 12.0f, 1.0f));
     EXPECT_TRUE(HasRectShape(shapes, palette[0], 0.0f, 11.0f, 12.0f, 12.0f));
@@ -315,7 +346,7 @@ TEST(Vectorizer, CoverageGuardHandlesEmptySourceMask) {
     std::vector<Rgb> palette = {Rgb(0.0f, 0.5f, 1.0f)};
     std::vector<detail::VectorizedShape> shapes;
 
-    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f);
+    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f, 0.0f);
 
     EXPECT_TRUE(shapes.empty());
 }

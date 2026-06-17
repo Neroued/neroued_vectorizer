@@ -130,7 +130,12 @@ class VectorizerConfig:
     enable_coverage_fix: bool
     """Patch uncovered pixels after vectorization."""
     min_coverage_ratio: float
-    """Minimum coverage ratio before patching kicks in."""
+    """Global coverage ratio trigger; lower values tolerate more missing pixels."""
+    max_unpatched_gap_area: float
+    """Patch local gaps larger than this area even when global coverage passes.
+
+    Negative disables the local-gap trigger.
+    """
     enable_depth_validation: bool
     """V2 only: run depth order validation (diagnostic)."""
 

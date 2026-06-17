@@ -188,7 +188,10 @@ PYBIND11_MODULE(_core, m) {
     cfg.def_readwrite("enable_coverage_fix", &VectorizerConfig::enable_coverage_fix,
                       "Patch uncovered pixels after vectorization.");
     cfg.def_readwrite("min_coverage_ratio", &VectorizerConfig::min_coverage_ratio,
-                      "Minimum coverage ratio before patching kicks in.");
+                      "Global coverage ratio trigger; lower values tolerate more missing pixels.");
+    cfg.def_readwrite("max_unpatched_gap_area", &VectorizerConfig::max_unpatched_gap_area,
+                      "Patch local gaps larger than this area even when global coverage passes. "
+                      "Negative disables the local-gap trigger.");
     cfg.def_readwrite("enable_depth_validation", &VectorizerConfig::enable_depth_validation,
                       "V2 only: run depth order validation (diagnostic).");
 

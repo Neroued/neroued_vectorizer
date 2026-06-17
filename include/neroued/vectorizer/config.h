@@ -68,11 +68,15 @@ struct VectorizerConfig {
                ///< segments. 0 disables merging.
 
     // ── Potrace pipeline knobs ──────────────────────────────────────────────
-    float min_contour_area   = 10.0f;  ///< Discard shapes smaller than this (pixels²).
-    float min_hole_area      = 4.0f;   ///< Minimum hole area retained in final paths.
-    float contour_simplify   = 0.45f;  ///< Contour simplification strength (larger => fewer nodes).
-    bool enable_coverage_fix = true;   ///< Patch uncovered pixels after vectorization.
-    float min_coverage_ratio = 0.998f; ///< Minimum coverage ratio before patching.
+    float min_contour_area   = 10.0f; ///< Discard shapes smaller than this (pixels²).
+    float min_hole_area      = 4.0f;  ///< Minimum hole area retained in final paths.
+    float contour_simplify   = 0.45f; ///< Contour simplification strength (larger => fewer nodes).
+    bool enable_coverage_fix = true;  ///< Patch uncovered pixels after vectorization.
+    float min_coverage_ratio =
+        0.998f; ///< Global coverage ratio trigger; lower values tolerate more missing pixels.
+    float max_unpatched_gap_area =
+        0.0f; ///< Patch local gaps larger than this area even when global coverage passes. Negative
+              ///< disables the local-gap trigger.
 
     // ── Diagnostics ──────────────────────────────────────────────────────────
     bool enable_depth_validation = false; ///< V2 only: run depth order validation (diagnostic).

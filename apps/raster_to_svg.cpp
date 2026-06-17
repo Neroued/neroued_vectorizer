@@ -35,6 +35,7 @@ struct Options {
     float subpixel_max_displacement = 0.7f;
     bool enable_coverage_fix        = true;
     float min_coverage_ratio        = 0.998f;
+    float max_unpatched_gap_area    = 0.0f;
     float smoothness                = 0.5f;
     float detail_level              = -1.0f;
     float merge_segment_tolerance   = 0.05f;
@@ -73,6 +74,8 @@ void PrintUsage(const char* exe) {
                 "  --subpixel-max-displacement F Sub-pixel max displacement (default 0.7)\n"
                 "  --disable-coverage-fix Disable coverage patching\n"
                 "  --min-coverage-ratio F Coverage fix trigger ratio (default 0.998)\n"
+                "  --max-unpatched-gap-area F Patch local gaps larger than this even when global "
+                "coverage passes; negative disables local trigger (default 0)\n"
                 "  --smoothness F      Contour smoothness [0,1] (default 0.5)\n"
                 "  --detail-level F    Unified detail control [0,1], -1 disables (default -1)\n"
                 "  --merge-tolerance F Near-linear segment merge tolerance (default 0.05)\n"
@@ -265,6 +268,13 @@ bool ParseArgs(int argc, char** argv, Options& opt) {
             }
             continue;
         }
+        if (arg == "--max-unpatched-gap-area" && i + 1 < argc) {
+            if (!ParseFloat(argv[++i], opt.max_unpatched_gap_area)) {
+                std::fprintf(stderr, "Invalid --max-unpatched-gap-area\n");
+                return false;
+            }
+            continue;
+        }
         if (arg == "--smoothness" && i + 1 < argc) {
             if (!ParseFloat(argv[++i], opt.smoothness)) {
                 std::fprintf(stderr, "Invalid --smoothness\n");
@@ -374,6 +384,7 @@ int main(int argc, char** argv) {
         cfg.subpixel_max_displacement = opt.subpixel_max_displacement;
         cfg.enable_coverage_fix       = opt.enable_coverage_fix;
         cfg.min_coverage_ratio        = opt.min_coverage_ratio;
+        cfg.max_unpatched_gap_area    = opt.max_unpatched_gap_area;
         cfg.smoothness                = opt.smoothness;
         cfg.detail_level              = opt.detail_level;
         cfg.merge_segment_tolerance   = opt.merge_segment_tolerance;

@@ -55,6 +55,7 @@ VectorizerConfig PartialVectorizerConfig::MergeInto(const VectorizerConfig& base
     MERGE_FIELD(contour_simplify);
     MERGE_FIELD(enable_coverage_fix);
     MERGE_FIELD(min_coverage_ratio);
+    MERGE_FIELD(max_unpatched_gap_area);
     MERGE_FIELD(smoothness);
     MERGE_FIELD(detail_level);
     MERGE_FIELD(merge_segment_tolerance);
@@ -277,6 +278,7 @@ PartialVectorizerConfig ParsePartialConfig(const JsonValue& v) {
     OPT_FLOAT(contour_simplify);
     OPT_BOOL(enable_coverage_fix);
     OPT_FLOAT(min_coverage_ratio);
+    OPT_FLOAT(max_unpatched_gap_area);
     OPT_FLOAT(smoothness);
     OPT_FLOAT(detail_level);
     OPT_FLOAT(merge_segment_tolerance);

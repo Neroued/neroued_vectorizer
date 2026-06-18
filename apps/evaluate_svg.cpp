@@ -55,6 +55,8 @@ void PrintUsage(const char* exe) {
                 "  --disable-subpixel-refine Disable sub-pixel boundary refinement\n"
                 "  --disable-coverage-fix    Disable coverage patching\n"
                 "  --min-coverage-ratio F    Coverage fix trigger ratio\n"
+                "  --max-unpatched-gap-area F Local gap area trigger; negative disables local "
+                "trigger\n"
                 "  --smoothness F            Contour smoothness [0,1]\n"
                 "  --detail-level F          Unified detail control [0,1]\n"
                 "  --merge-tolerance F       Near-linear segment merge tolerance\n"
@@ -169,6 +171,7 @@ bool ParseArgs(int argc, char** argv, Options& opt) {
         TRY_INT_OPT("--refine-passes", refine_passes)
         TRY_FLOAT_OPT("--max-merge-color-dist", max_merge_color_dist)
         TRY_FLOAT_OPT("--min-coverage-ratio", min_coverage_ratio)
+        TRY_FLOAT_OPT("--max-unpatched-gap-area", max_unpatched_gap_area)
         TRY_FLOAT_OPT("--smoothness", smoothness)
         TRY_FLOAT_OPT("--detail-level", detail_level)
         TRY_FLOAT_OPT("--merge-tolerance", merge_segment_tolerance)

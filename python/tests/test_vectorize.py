@@ -27,6 +27,7 @@ def test_config_defaults():
     assert cfg.min_region_area == 50
     assert isinstance(cfg.curve_fit_error, float)
     assert cfg.enable_coverage_fix is True
+    assert cfg.max_unpatched_gap_area == pytest.approx(0.0)
 
 
 def test_config_readwrite():
@@ -34,9 +35,11 @@ def test_config_readwrite():
     cfg.num_colors = 8
     cfg.curve_fit_error = 1.5
     cfg.enable_coverage_fix = False
+    cfg.max_unpatched_gap_area = -1.0
     assert cfg.num_colors == 8
     assert cfg.curve_fit_error == pytest.approx(1.5)
     assert cfg.enable_coverage_fix is False
+    assert cfg.max_unpatched_gap_area == pytest.approx(-1.0)
 
 
 # ── Rgb ──────────────────────────────────────────────────────────────────────

@@ -2,6 +2,8 @@
 
 #include <neroued/vectorizer/vectorizer.h>
 #include "curve/bezier.h"
+#include "output/svg_writer.h"
+#include "trace/coverage.h"
 
 #include <nanosvg/nanosvg.h>
 #include <opencv2/core.hpp>
@@ -9,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace neroued::vectorizer;
@@ -124,6 +127,80 @@ VectorizerConfig BaseConfig() {
     return cfg;
 }
 
+detail::BezierContour RectContour(float x0, float y0, float x1, float y1) {
+    detail::BezierContour contour;
+    contour.segments = {
+        detail::MakeLinearBezier({x0, y0}, {x1, y0}),
+        detail::MakeLinearBezier({x1, y0}, {x1, y1}),
+        detail::MakeLinearBezier({x1, y1}, {x0, y1}),
+        detail::MakeLinearBezier({x0, y1}, {x0, y0}),
+    };
+    contour.closed = true;
+    return contour;
+}
+
+detail::VectorizedShape RectShape(float x0, float y0, float x1, float y1, Rgb color) {
+    detail::VectorizedShape shape;
+    shape.contours.push_back(RectContour(x0, y0, x1, y1));
+    shape.color = color;
+    shape.area  = static_cast<double>((x1 - x0) * (y1 - y0));
+    return shape;
+}
+
+bool SameColor(const Rgb& a, const Rgb& b) {
+    return std::abs(a.r() - b.r()) < 1e-4f && std::abs(a.g() - b.g()) < 1e-4f &&
+           std::abs(a.b() - b.b()) < 1e-4f;
+}
+
+bool HasRectShape(const std::vector<detail::VectorizedShape>& shapes, const Rgb& color, float x0,
+                  float y0, float x1, float y1) {
+    constexpr float kTol = 1e-4f;
+    for (const auto& shape : shapes) {
+        if (!SameColor(shape.color, color) || shape.contours.size() != 1) continue;
+        const auto& contour = shape.contours.front();
+        if (contour.segments.size() != 4) continue;
+
+        float min_x = std::numeric_limits<float>::max();
+        float min_y = std::numeric_limits<float>::max();
+        float max_x = std::numeric_limits<float>::lowest();
+        float max_y = std::numeric_limits<float>::lowest();
+        for (const auto& seg : contour.segments) {
+            for (const Vec2f& p : {seg.p0, seg.p1, seg.p2, seg.p3}) {
+                min_x = std::min(min_x, p.x);
+                min_y = std::min(min_y, p.y);
+                max_x = std::max(max_x, p.x);
+                max_y = std::max(max_y, p.y);
+            }
+        }
+
+        if (std::abs(min_x - x0) < kTol && std::abs(min_y - y0) < kTol &&
+            std::abs(max_x - x1) < kTol && std::abs(max_y - y1) < kTol) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int CountUncoveredSourcePixels(const std::vector<detail::VectorizedShape>& shapes,
+                               const cv::Mat& labels, int width, int height) {
+    auto svg    = detail::WriteSvg(shapes, width, height, false, 0.5f);
+    auto raster = RasterizeSvg(svg, width, height);
+
+    cv::Mat source_mask(height, width, CV_8UC1, cv::Scalar(0));
+    for (int y = 0; y < height; ++y) {
+        const int* label_row = labels.ptr<int>(y);
+        uint8_t* out         = source_mask.ptr<uint8_t>(y);
+        for (int x = 0; x < width; ++x) {
+            if (label_row[x] >= 0) out[x] = 255;
+        }
+    }
+
+    cv::Mat missing;
+    cv::bitwise_not(raster.coverage, missing);
+    cv::bitwise_and(missing, source_mask, missing);
+    return cv::countNonZero(missing);
+}
+
 } // namespace
 
 TEST(Vectorizer, KeepsTopLeftRegionAndNoNegativePathCoords) {
@@ -162,6 +239,116 @@ TEST(Vectorizer, CoverageNearFullForSolidPartitionImage) {
     double ratio = (total > 0) ? static_cast<double>(filled) / static_cast<double>(total) : 0.0;
 
     EXPECT_GT(ratio, 0.995);
+    EXPECT_LT(out.num_shapes, 20);
+    EXPECT_LT(out.svg_content.size(), 6000U);
+}
+
+TEST(Vectorizer, CoverageGuardPatchesLocalGapEvenWhenGlobalRatioPasses) {
+    const int width  = 64;
+    const int height = 64;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(0));
+    std::vector<Rgb> palette = {Rgb(1.0f, 0.0f, 0.0f)};
+
+    std::vector<detail::VectorizedShape> shapes;
+    shapes.push_back(RectShape(0.0f, 0.0f, 63.0f, 31.0f, palette[0]));
+    shapes.push_back(RectShape(0.0f, 34.0f, 63.0f, 63.0f, palette[0]));
+    shapes.push_back(RectShape(0.0f, 32.0f, 31.0f, 34.0f, palette[0]));
+    shapes.push_back(RectShape(34.0f, 32.0f, 63.0f, 34.0f, palette[0]));
+
+    const size_t before = shapes.size();
+    detail::ApplyCoverageGuard(shapes, labels, palette, 0.995f, 0.45f, 1.0f, 0.0f);
+
+    EXPECT_GT(shapes.size(), before);
+    EXPECT_EQ(CountUncoveredSourcePixels(shapes, labels, width, height), 0);
+}
+
+TEST(Vectorizer, CoverageGuardCanDisableLocalGapTrigger) {
+    const int width  = 64;
+    const int height = 64;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(0));
+    std::vector<Rgb> palette = {Rgb(1.0f, 0.0f, 0.0f)};
+
+    std::vector<detail::VectorizedShape> shapes;
+    shapes.push_back(RectShape(0.0f, 0.0f, 63.0f, 31.0f, palette[0]));
+    shapes.push_back(RectShape(0.0f, 34.0f, 63.0f, 63.0f, palette[0]));
+    shapes.push_back(RectShape(0.0f, 32.0f, 31.0f, 34.0f, palette[0]));
+    shapes.push_back(RectShape(34.0f, 32.0f, 63.0f, 34.0f, palette[0]));
+
+    const size_t before = shapes.size();
+    detail::ApplyCoverageGuard(shapes, labels, palette, 0.90f, 0.45f, 1.0f, -1.0f);
+
+    EXPECT_EQ(shapes.size(), before);
+    EXPECT_GT(CountUncoveredSourcePixels(shapes, labels, width, height), 0);
+}
+
+TEST(Vectorizer, CoverageGuardSplitsPatchColorsBySourceLabel) {
+    const int width  = 64;
+    const int height = 64;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(0));
+    for (int y = 0; y < height; ++y) {
+        int* row = labels.ptr<int>(y);
+        for (int x = 32; x < width; ++x) row[x] = 1;
+    }
+
+    std::vector<Rgb> palette = {Rgb(1.0f, 0.0f, 0.0f), Rgb(0.0f, 0.0f, 1.0f)};
+
+    std::vector<detail::VectorizedShape> shapes;
+    shapes.push_back(RectShape(0.0f, 0.0f, 29.0f, 63.0f, palette[0]));
+    shapes.push_back(RectShape(30.0f, 0.0f, 31.0f, 29.0f, palette[0]));
+    shapes.push_back(RectShape(30.0f, 34.0f, 31.0f, 63.0f, palette[0]));
+    shapes.push_back(RectShape(34.0f, 0.0f, 63.0f, 63.0f, palette[1]));
+    shapes.push_back(RectShape(32.0f, 0.0f, 33.0f, 29.0f, palette[1]));
+    shapes.push_back(RectShape(32.0f, 34.0f, 33.0f, 63.0f, palette[1]));
+
+    const size_t before = shapes.size();
+    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f, 0.0f);
+
+    int red_patches  = 0;
+    int blue_patches = 0;
+    for (size_t i = before; i < shapes.size(); ++i) {
+        if (SameColor(shapes[i].color, palette[0])) ++red_patches;
+        if (SameColor(shapes[i].color, palette[1])) ++blue_patches;
+    }
+
+    EXPECT_GT(red_patches, 0);
+    EXPECT_GT(blue_patches, 0);
+
+    auto svg            = detail::WriteSvg(shapes, width, height, false, 0.5f);
+    auto raster         = RasterizeSvg(svg, width, height);
+    cv::Vec3b red_seam  = raster.bgr.at<cv::Vec3b>(32, 30);
+    cv::Vec3b blue_seam = raster.bgr.at<cv::Vec3b>(32, 33);
+
+    EXPECT_GT(static_cast<int>(red_seam[2]), 200);
+    EXPECT_LT(static_cast<int>(red_seam[0]), 80);
+    EXPECT_GT(static_cast<int>(blue_seam[0]), 200);
+    EXPECT_LT(static_cast<int>(blue_seam[2]), 80);
+}
+
+TEST(Vectorizer, CoverageGuardAddsPixelBoundaryUnderpaint) {
+    const int width  = 12;
+    const int height = 12;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(0));
+    std::vector<Rgb> palette = {Rgb(0.0f, 0.5f, 1.0f)};
+
+    std::vector<detail::VectorizedShape> shapes;
+    shapes.push_back(RectShape(1.0f, 1.0f, 10.0f, 10.0f, palette[0]));
+
+    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f, 0.0f);
+
+    EXPECT_TRUE(HasRectShape(shapes, palette[0], 0.0f, 0.0f, 12.0f, 1.0f));
+    EXPECT_TRUE(HasRectShape(shapes, palette[0], 0.0f, 11.0f, 12.0f, 12.0f));
+}
+
+TEST(Vectorizer, CoverageGuardHandlesEmptySourceMask) {
+    const int width  = 12;
+    const int height = 12;
+    cv::Mat labels(height, width, CV_32SC1, cv::Scalar(-1));
+    std::vector<Rgb> palette = {Rgb(0.0f, 0.5f, 1.0f)};
+    std::vector<detail::VectorizedShape> shapes;
+
+    detail::ApplyCoverageGuard(shapes, labels, palette, 1.0f, 0.45f, 1.0f, 0.0f);
+
+    EXPECT_TRUE(shapes.empty());
 }
 
 TEST(Vectorizer, TransparentPngDoesNotLeakHiddenRgb) {

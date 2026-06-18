@@ -39,6 +39,7 @@ struct PartialVectorizerConfig {
     std::optional<float> contour_simplify;
     std::optional<bool> enable_coverage_fix;
     std::optional<float> min_coverage_ratio;
+    std::optional<float> max_unpatched_gap_area;
     std::optional<float> smoothness;
     std::optional<float> detail_level;
     std::optional<float> merge_segment_tolerance;

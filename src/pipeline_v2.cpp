@@ -279,7 +279,8 @@ VectorizerResult RunPipelineV2(const cv::Mat& bgr, const VectorizerConfig& cfg,
             (num_labels > 2) ? std::min(cfg.min_coverage_ratio, 0.995f) : cfg.min_coverage_ratio;
         float min_patch_area = std::max(1.f, cfg.min_contour_area * 0.5f);
         size_t pre_patch     = shapes.size();
-        ApplyCoverageGuard(shapes, labels, palette, min_ratio, trace_eps, min_patch_area);
+        ApplyCoverageGuard(shapes, labels, palette, min_ratio, trace_eps, min_patch_area,
+                           cfg.max_unpatched_gap_area);
         size_t num_patches = shapes.size() - pre_patch;
         if (num_patches > 0) {
             // Rotate patches to bottom of z-order so they only show through

@@ -169,15 +169,18 @@ TEST(Scoring, DegradedScore) {
 
 TEST(Config, MergeOverridesOnlySet) {
     VectorizerConfig base;
-    base.num_colors       = 16;
-    base.contour_simplify = 0.45f;
+    base.num_colors             = 16;
+    base.contour_simplify       = 0.45f;
+    base.max_unpatched_gap_area = 12.0f;
 
     PartialVectorizerConfig partial;
-    partial.num_colors = 24;
+    partial.num_colors             = 24;
+    partial.max_unpatched_gap_area = -1.0f;
 
     auto merged = partial.MergeInto(base);
     EXPECT_EQ(merged.num_colors, 24);
     EXPECT_FLOAT_EQ(merged.contour_simplify, 0.45f);
+    EXPECT_FLOAT_EQ(merged.max_unpatched_gap_area, -1.0f);
 }
 
 TEST(Config, ThreeLayerMerge) {

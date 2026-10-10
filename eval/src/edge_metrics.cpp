@@ -1,6 +1,9 @@
 #include "edge_metrics.h"
 
 #include <opencv2/imgproc.hpp>
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/geometry.hpp> // OpenCV 5 moved DistanceTypes to the geometry module
+#endif
 
 #include <algorithm>
 

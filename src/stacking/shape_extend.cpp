@@ -1,6 +1,9 @@
 #include "shape_extend.h"
 
 #include <opencv2/imgproc.hpp>
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/geometry.hpp> // OpenCV 5 moved boundingRect to the geometry module
+#endif
 #include <spdlog/spdlog.h>
 
 namespace neroued::vectorizer::detail {

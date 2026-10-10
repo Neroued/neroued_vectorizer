@@ -33,7 +33,7 @@ option(NV_BUILD_TESTS "Build unit tests" ON)
 option(NV_BUILD_PYTHON "Build Python bindings (requires pybind11)" OFF)
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
-find_package(OpenCV 4.5 REQUIRED COMPONENTS core imgproc imgcodecs)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 
 include(FetchContent)
 
